@@ -7,10 +7,11 @@ import { ConfirmButton, CopyButton, Empty, ErrorNote, Field, Loading, timeAgo } 
 import { errorText, keys, useProjects, useWs } from "../queries";
 
 // The two snippets from integrations/claude-code/README.md (Task 14), verbatim.
+export const HOOK_SCRIPT_URL = "https://github.com/Congroooooo/threadline/blob/main/integrations/claude-code/session-start.mjs";
 export const MCP_SNIPPET = `{ "mcpServers": { "threadline": { "type": "http", "url": "\${THREADLINE_URL}/mcp",
     "headers": { "Authorization": "Bearer \${THREADLINE_TOKEN}" } } } }`;
 export const HOOK_SNIPPET = `{ "hooks": { "SessionStart": [ { "hooks": [ { "type": "command",
-    "command": "node integrations/claude-code/session-start.mjs" } ] } ] } }`;
+    "command": "node \\"$CLAUDE_PROJECT_DIR/.claude/hooks/threadline-session-start.mjs\\"" } ] } ] } }`;
 
 function NewToken({ name, token, onDone }: { name: string; token: string; onDone: () => void }) {
   const env = `export THREADLINE_URL=${window.location.origin}\nexport THREADLINE_TOKEN=${token}`;
@@ -29,7 +30,13 @@ function NewToken({ name, token, onDone }: { name: string; token: string; onDone
       <p className="step">2. Connect the agent to Threadline (MCP settings, for example .mcp.json):</p>
       <pre className="code">{MCP_SNIPPET}</pre>
       <CopyButton text={MCP_SNIPPET} />
-      <p className="step">3. For Claude Code, add the session-start hook (.claude/settings.json):</p>
+      <p className="step">
+        3. For Claude Code, copy{" "}
+        <a href={HOOK_SCRIPT_URL} target="_blank" rel="noreferrer">
+          session-start.mjs
+        </a>{" "}
+        to your project's .claude/hooks/threadline-session-start.mjs, then add the hook (.claude/settings.json):
+      </p>
       <pre className="code">{HOOK_SNIPPET}</pre>
       <CopyButton text={HOOK_SNIPPET} />
       <div className="actions">

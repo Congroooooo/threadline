@@ -111,6 +111,19 @@ test("prints nothing on a non-200 response", async () => {
   assert.deepEqual([r.code, r.stdout, r.stderr], [0, "", ""]);
 });
 
+test("prints a large body in full up to 64 KB and drops the rest", async () => {
+  const big = "x".repeat(300 * 1024);
+  const srv = await serve((_req, res) => res.writeHead(200).end(big));
+  const repo = gitRepo("https://git.example/a/b.git", "main");
+  const r = await run(repo, { THREADLINE_URL: srv.url, THREADLINE_TOKEN: TOKEN });
+  assert.equal(r.code, 0);
+  assert.equal(r.stdout.length, 64 * 1024);
+  const small = "y".repeat(60 * 1024);
+  const srv2 = await serve((_req, res) => res.writeHead(200).end(small));
+  const r2 = await run(repo, { THREADLINE_URL: srv2.url, THREADLINE_TOKEN: TOKEN });
+  assert.equal(r2.stdout, small);
+});
+
 test("omits branch when HEAD is detached", async () => {
   const srv = await serve((_req, res) => res.end("ok"));
   const repo = gitRepo("https://git.example/a/b.git", "main");

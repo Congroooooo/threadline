@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 
 const TIMEOUT_MS = 3000;
+const MAX_BYTES = 64 * 1024; // a huge response must not flood the session
 
 function git(args) {
   return new Promise((resolve) => {
@@ -37,8 +38,8 @@ async function main() {
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) return;
-  const body = await res.text();
-  if (body) process.stdout.write(body);
+  const bytes = new Uint8Array(await res.arrayBuffer()).subarray(0, MAX_BYTES);
+  if (bytes.length > 0) process.stdout.write(bytes);
 }
 
 try {
@@ -46,4 +47,5 @@ try {
 } catch {
   // Print nothing: a hook failure must not reach the session.
 }
-process.exit(0);
+// Not process.exit(): it can cut off pending stdout writes. Let the process end on its own.
+process.exitCode = 0;

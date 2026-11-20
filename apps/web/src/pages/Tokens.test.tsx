@@ -4,7 +4,7 @@ import { Link, Outlet, Route } from "react-router";
 import { beforeEach, expect, test, vi } from "vitest";
 import { fakeApi, resetFakeApi } from "../test/fakeApi";
 import { renderAt } from "../test/render";
-import { Tokens } from "./Tokens";
+import { HOOK_SCRIPT_URL, Tokens } from "./Tokens";
 
 vi.mock("../api", async (orig) => ({ ...(await orig<typeof import("../api")>()), api: (await import("../test/fakeApi")).fakeApi }));
 
@@ -42,6 +42,8 @@ test("a new token is shown once and is gone after navigating away and back", asy
   // Both setup snippets from the integration guide.
   expect(screen.getByText(/"mcpServers"/)).toBeTruthy();
   expect(screen.getByText(/"SessionStart"/)).toBeTruthy();
+  expect(screen.getByText(/\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\/threadline-session-start\.mjs/)).toBeTruthy();
+  expect(screen.getByRole("link", { name: "session-start.mjs" }).getAttribute("href")).toBe(HOOK_SCRIPT_URL);
 
   // Kept only in component state: nothing in the query or mutation caches holds it.
   const cached = JSON.stringify([

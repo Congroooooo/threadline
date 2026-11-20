@@ -7,7 +7,7 @@
   "packageManager": "pnpm@11.2.2",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "vitest run && node --test integrations/claude-code/session-start.test.mjs",
+    "test": "pnpm -r --no-bail --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present typecheck"
   },

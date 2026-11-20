@@ -29,23 +29,18 @@ Add to `.mcp.json` in your project (Claude Code expands `${VAR}` from the enviro
 
 ## 3. Add the session-start hook (Claude Code)
 
-Add to `.claude/settings.json`:
+Copy `integrations/claude-code/session-start.mjs` to your project's `.claude/hooks/threadline-session-start.mjs`, then add to `.claude/settings.json`:
 
 ```json
 { "hooks": { "SessionStart": [ { "hooks": [ { "type": "command",
-    "command": "node integrations/claude-code/session-start.mjs" } ] } ] } }
+    "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/threadline-session-start.mjs\"" } ] } ] } }
 ```
 
-That path is relative to the repository the hook is installed in, so it works as written only where this folder exists, for example a checkout of Threadline itself.
-
-To use it in another project, copy `session-start.mjs` to that project's `.claude/hooks/threadline-session-start.mjs` and point the hook at it with `$CLAUDE_PROJECT_DIR`, which Claude Code expands to the project root:
-
-```json
-{ "hooks": { "SessionStart": [ { "hooks": [ { "type": "command",
-    "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/threadline-session-start.mjs" } ] } ] } }
-```
+`$CLAUDE_PROJECT_DIR` is expanded by Claude Code to the project root.
 
 (Unverified: this `$CLAUDE_PROJECT_DIR` form was written without checking the current Claude Code hooks documentation. Check it there if the hook does not run.)
+
+Inside a checkout of Threadline itself the script can instead be referenced by its repo-relative path: `"command": "node integrations/claude-code/session-start.mjs"`.
 
 ### What the hook does
 
