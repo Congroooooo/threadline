@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   createAgentToken,
   createSession,
+  endSession,
   findOrCreateUser,
   getUser,
   listMemberships,
@@ -98,6 +99,17 @@ describe("users and sessions", () => {
     expect(await resolveSession(db, token)).toEqual({ userId });
     await rawQuery(db, "update sessions set expires_at = now() - interval '1 second'");
     expect(await resolveSession(db, token)).toBeNull();
+  });
+
+  test("endSession expires the session and keeps its row; other sessions keep working", async () => {
+    const { token } = await createSession(db, userId);
+    const other = await createSession(db, userId);
+    await endSession(db, token);
+    expect(await resolveSession(db, token)).toBeNull();
+    expect(await resolveSession(db, other.token)).toEqual({ userId });
+    expect(await rawQuery(db, "select count(*)::int as n from sessions")).toEqual([{ n: 2 }]);
+    await endSession(db, token); // twice: no-op
+    await endSession(db, "not a token");
   });
 
   test("sessions are stored only as hashes and unknown tokens do not resolve", async () => {

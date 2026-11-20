@@ -41,3 +41,26 @@ export function withSystem<T>(db: Db, fn: (tx: Tx) => Promise<T>): Promise<T> {
     return fn(tx);
   });
 }
+
+/**
+ * Startup and health guard: row-level security only protects anything if the application's
+ * database role is not a superuser, has no BYPASSRLS and owns no tables in `public` (owners
+ * skip unforced policies, and could drop them). Returns what is wrong, without throwing.
+ */
+export async function checkDatabaseRole(db: Db): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const result = await db.execute(sql`
+    select r.rolname as role, r.rolsuper as superuser, r.rolbypassrls as bypassrls,
+           (select count(*)::int from pg_class c
+             where c.relnamespace = 'public'::regnamespace
+               and c.relkind in ('r', 'p')
+               and c.relowner = r.oid) as owned
+      from pg_roles r
+     where r.rolname = current_user`);
+  const rows = Array.isArray(result) ? result : ((result as { rows?: unknown[] }).rows ?? []);
+  const row = rows[0] as { role: string; superuser: boolean; bypassrls: boolean; owned: number } | undefined;
+  if (!row) return { ok: false, reason: "current database role not found" };
+  if (row.superuser) return { ok: false, reason: `database role ${row.role} is a superuser` };
+  if (row.bypassrls) return { ok: false, reason: `database role ${row.role} has BYPASSRLS` };
+  if (Number(row.owned) > 0) return { ok: false, reason: `database role ${row.role} owns ${row.owned} tables in public` };
+  return { ok: true };
+}

@@ -1,3 +1,4 @@
+/// <reference path="./import-meta-glob.d.ts" />
 // The SQL migrations as a list, for test code only (Vite's import.meta.glob, no Node file APIs).
 import { type Migration, migrationName } from "./migrate.js";
 

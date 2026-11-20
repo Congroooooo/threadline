@@ -142,6 +142,18 @@ export async function resolveSession(db: Db, token: string): Promise<{ userId: s
   return row ? { userId: row.userId } : null;
 }
 
+/** Signs the session out by expiring it now (rows are kept). Unknown or malformed tokens: no-op. */
+export async function endSession(db: Db, token: string): Promise<void> {
+  if (typeof token !== "string" || !SESSION_TOKEN.test(token)) return;
+  const tokenHash = await hashSecret(token);
+  await withSystem(db, (tx) =>
+    tx
+      .update(sessions)
+      .set({ expiresAt: sql`now()` })
+      .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, sql`now()`))),
+  );
+}
+
 /** The user's active memberships, by workspace name. */
 export async function listMemberships(
   db: Db,

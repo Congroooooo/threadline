@@ -1,7 +1,7 @@
 export * from "./ids.js";
 export * from "./types.js";
 export * from "./safety.js";
-export { createDb, withSystem, withWorkspace, type Db, type Schema, type Tx } from "./db/client.js";
+export { checkDatabaseRole, createDb, withSystem, withWorkspace, type Db, type Schema, type Tx } from "./db/client.js";
 // Tables stay internal: apps go through withWorkspace and core functions, never Drizzle tables.
 export type {
   AgentIdentityRow,
@@ -38,6 +38,7 @@ export {
   findOrCreateUser,
   getUser,
   createSession,
+  endSession,
   resolveSession,
   listMemberships,
   createAgentToken,
