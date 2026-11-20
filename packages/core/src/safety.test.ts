@@ -63,6 +63,8 @@ test("keeps short non-secret values next to secret-ish words", () => {
   expect(redactSecrets("token: expired")).toBe("token: expired");
   expect(redactSecrets("secret: no, tokens: 5")).toBe("secret: no, tokens: 5");
   expect(redactSecrets("password reset link sent")).toBe("password reset link sent");
+  // a URL query parameter is always treated as a secret
+  expect(redactSecrets("https://ci.example.com/r/9?token=short&page=2")).toBe("https://ci.example.com/r/9?token=[REDACTED]&page=2");
 });
 test("capText rejects text over the limit", () => {
   expect(() => capText("x".repeat(10_001), "note")).toThrow(ValidationError);

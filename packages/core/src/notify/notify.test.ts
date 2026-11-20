@@ -128,6 +128,11 @@ describe("notifiers", () => {
     expect(emoji).not.toContain("\u{1F600}".repeat(60));
   });
 
+  test("names lose Markdown link and emphasis characters", () => {
+    const m = handoffMessage({ ref: "ACME-1", fromName: "[click](https://evil.example) *b* _i_ ~s~ `c`", toRoleName: "Q_A", unassigned: false });
+    expect(m).toBe("Handoff on ACME-1 from clickhttps://evil.example b i s c to QA.");
+  });
+
   test("the response body is cancelled on 2xx, non-2xx and 3xx", async () => {
     for (const status of [200, 500, 302]) {
       let cancelled = 0;

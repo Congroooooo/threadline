@@ -141,7 +141,7 @@ describe("handoffs", () => {
     const { handoffId } = await t.inWs((tx) =>
       createHandoff(tx, t.backendAgent, {
         ...input,
-        delivered: "done; token=abc123",
+        delivered: "done; token=abc123def",
         requiredAction: "use glpat-abcdefghijklmnopqrstuvwx",
         knownLimits: "x",
         evidence: [{ kind: "change_request", url: "https://git.example.com/acme/app/-/merge_requests/7", externalId: "7" }],

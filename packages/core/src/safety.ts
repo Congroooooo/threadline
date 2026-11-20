@@ -27,15 +27,18 @@ const BEARER = /\b(Bearer\s+)(?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{8,}=*/gi;
 /**
  * key=value, key: value, "key": "value" and 'key': 'value' where the key name contains a
  * secret-ish word (client_secret, private_key, access_token, DB_PASSWORD, ...). Password keys
- * redact any value; other keys only redact a value that looks like a secret (8+ chars, no
- * spaces), so prose such as "token: expired" is left alone.
+ * and URL query parameters (?token=...) redact any value; other keys only redact a value that
+ * looks like a secret (8+ chars, no spaces), so prose such as "token: expired" is left alone.
  */
 const SECRET_KEY = String.raw`[A-Za-z0-9_-]*?(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)[A-Za-z0-9_-]*`;
-const KEY_VALUE = new RegExp(String.raw`(["']?)\b(${SECRET_KEY})\1(\s*[=:]\s*)(["']?)([^\s"',;}]+)`, "gi");
+const KEY_VALUE = new RegExp(String.raw`(["']?)\b(${SECRET_KEY})\1(\s*[=:]\s*)(["']?)([^\s"',;}&]+)`, "gi");
 
-function redactKeyValue(match: string, q1: string, key: string, sep: string, q2: string, value: string): string {
+function redactKeyValue(
+  match: string, q1: string, key: string, sep: string, q2: string, value: string, offset: number, whole: string,
+): string {
   const isPassword = /pass(?:word|wd)/i.test(key);
-  if (!isPassword && value.length < 8) return match;
+  const isQueryParam = q1 === "" && (whole[offset - 1] === "?" || whole[offset - 1] === "&");
+  if (!isPassword && !isQueryParam && value.length < 8) return match;
   return `${q1}${key}${q1}${sep}${q2}${REDACTED}`;
 }
 
