@@ -22,7 +22,8 @@
   --done: #11714f;
   --done-bg: #e5f5ee;
   --error: #b4233f;
-  --focus: #1ba9f5;
+  /* A darker brand blue, so the focus ring keeps 3:1 contrast on the light backgrounds. */
+  --focus: #0b6fb8;
 
   --radius-s: 6px;
   --radius-m: 10px;
@@ -49,6 +50,7 @@
     --done: #5ad1a0;
     --done-bg: #12302a;
     --error: #ff7d93;
+    --focus: #1ba9f5;
     color-scheme: dark;
   }
 }
@@ -670,8 +672,9 @@ legend {
   padding: 16px 18px;
   margin: 12px 0;
 }
-.item-blocker {
-  border-left: 3px solid var(--blocked);
+/* A blocker is marked by its status tag in the header, not by a coloured side stripe. */
+.item-blocker .item-head .tag {
+  margin-left: auto;
 }
 .item-head {
   display: flex;

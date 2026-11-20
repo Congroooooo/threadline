@@ -104,7 +104,14 @@ export function inviteCodeFrom(input: string): string | null {
   const text = input.trim();
   if (text === "") return null;
   const match = /\/join\/([^/?#\s]+)/.exec(text);
-  if (match) return decodeURIComponent(match[1]!);
+  if (match) {
+    // A malformed paste (a stray % escape) is just not an invite link.
+    try {
+      return decodeURIComponent(match[1]!);
+    } catch {
+      return null;
+    }
+  }
   return /^[A-Za-z0-9_-]+$/.test(text) ? text : null;
 }
 

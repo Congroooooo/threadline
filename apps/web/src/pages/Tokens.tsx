@@ -57,6 +57,8 @@ export function Tokens() {
   const [chosen, setChosen] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown with the list, so it is visible even while a new token replaces the create form.
+  const [revokeError, setRevokeError] = useState<string | null>(null);
   // Shown once: never put in the query cache or storage.
   const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
 
@@ -124,7 +126,7 @@ export function Tokens() {
 
       <section>
         <h2>Tokens</h2>
-        <ErrorNote error={tokens.error ? errorText(tokens.error) : null} />
+        <ErrorNote error={tokens.error ? errorText(tokens.error) : revokeError} />
         {tokens.isPending ? <Loading what="tokens" /> : null}
         {tokens.data?.length === 0 ? <Empty>No tokens yet. Create one above to connect an agent.</Empty> : null}
         <ul className="rows">
@@ -145,11 +147,12 @@ export function Tokens() {
                   ariaLabel={`Revoke ${t.name}`}
                   confirmLabel="Yes, revoke"
                   onConfirm={async () => {
+                    setRevokeError(null);
                     try {
                       await api.revokeToken(ws, t.id);
                       await client.invalidateQueries({ queryKey: keys.tokens(ws) });
                     } catch (err) {
-                      setError(errorText(err));
+                      setRevokeError(`Could not revoke ${t.name}: ${errorText(err)}`);
                     }
                   }}
                 />

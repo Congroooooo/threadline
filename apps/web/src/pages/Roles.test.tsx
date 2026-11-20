@@ -14,10 +14,13 @@ const role = (key: string, name: string, over: Partial<Role> = {}): Role => ({
   id: `r-${key}`, key, name, permissions: ["project.read"], archived: false, memberCount: 0, ...over,
 });
 
+const admin = role("admin", "Admin", { permissions: ["project.read", "workspace.admin"] });
+
 beforeEach(() => {
   resetFakeApi();
-  fakeApi.roles.mockResolvedValue([role("dev", "Developer"), role("legacy", "Legacy reviewer", { archived: true })]);
-  fakeApi.members.mockResolvedValue([{ memberId: "m1", displayName: "Ada", status: "active", roles: [] }]);
+  fakeApi.roles.mockResolvedValue([role("dev", "Developer"), admin, role("legacy", "Legacy reviewer", { archived: true })]);
+  // The signed-in person (fakeApi.me: memberId m1) is a workspace admin.
+  fakeApi.members.mockResolvedValue([{ memberId: "m1", displayName: "Ada", status: "active", roles: [{ key: "admin", projectId: null }] }]);
 });
 
 const renderRoles = () => renderAt("/w/w1/roles", <Route path="/w/:ws/roles" element={<Roles />} />);
@@ -63,4 +66,38 @@ test("Roles: archived roles are hidden from the member role picker", async () =>
   expect(options).not.toContain("legacy");
   const invite = screen.getByRole("form", { name: "Invite people" });
   expect(within(invite).queryByRole("checkbox", { name: /Legacy reviewer/ })).toBeNull();
+});
+
+test("Roles: 'Saved' stays visible after the roles are refetched with the new name", async () => {
+  renderRoles();
+  const dev = await screen.findByRole("form", { name: "Role dev" });
+  const name = within(dev).getByLabelText("Name");
+  await userEvent.clear(name);
+  await userEvent.type(name, "Engineer");
+  fakeApi.roles.mockResolvedValue([role("dev", "Engineer"), admin]);
+  await userEvent.click(within(dev).getByRole("button", { name: "Save" }));
+  const form = await screen.findByRole("form", { name: "Role dev" });
+  expect((await within(form).findByRole("status")).textContent).toBe("Saved");
+  expect((within(form).getByLabelText("Name") as HTMLInputElement).value).toBe("Engineer");
+  expect(within(form).getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+});
+
+test("Roles: permissions stored in another order do not count as a change", async () => {
+  fakeApi.roles.mockResolvedValue([role("dev", "Developer", { permissions: ["task.write", "project.read"] }), admin]);
+  renderRoles();
+  const dev = await screen.findByRole("form", { name: "Role dev" });
+  expect(within(dev).getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(true);
+  await userEvent.click(within(dev).getByRole("checkbox", { name: /Hand work over/ }));
+  expect(within(dev).getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(false);
+});
+
+test("Roles: without workspace.admin roles are read-only", async () => {
+  fakeApi.members.mockResolvedValue([{ memberId: "m1", displayName: "Ada", status: "active", roles: [{ key: "dev", projectId: null }] }]);
+  renderRoles();
+  expect(await screen.findByText("Only workspace admins can change roles.")).toBeTruthy();
+  const dev = screen.getByRole("form", { name: "Role dev" });
+  expect(within(dev).queryByRole("button", { name: "Save" })).toBeNull();
+  expect(within(dev).queryByRole("button", { name: "Archive" })).toBeNull();
+  expect((within(dev).getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
+  expect(screen.queryByRole("form", { name: "New role" })).toBeNull();
 });

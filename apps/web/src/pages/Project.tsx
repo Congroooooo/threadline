@@ -273,6 +273,8 @@ export function Project() {
 
           <section aria-label="Open blockers">
             <h2>Open blockers</h2>
+            <ErrorNote error={blockers.error ? `Could not load blockers: ${errorText(blockers.error)}` : null} />
+            {blockers.isPending ? <Loading what="blockers" /> : null}
             {blockers.data?.length === 0 ? <Empty>Nothing is blocked.</Empty> : null}
             {blockers.data?.map((b) => (
               <BlockerCard key={b.id} ws={ws} b={b} />

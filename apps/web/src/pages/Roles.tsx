@@ -1,10 +1,17 @@
 // Roles and their permissions: create, rename, change permissions, archive and restore.
+// Changing roles is for workspace admins; everyone else sees them read-only.
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Role } from "../api";
 import { ErrorNote, Field, Loading } from "../components/ui";
 import { HUMAN_ONLY, type Permission, PERMISSION_LABELS, PERMISSIONS } from "../permissions";
-import { errorText, keys, useRoles, useWs } from "../queries";
+import { errorText, keys, useMyPermissions, useRoles, useWs } from "../queries";
+
+/** Same permissions, whatever the order. */
+function samePermissions(a: readonly Permission[], b: readonly Permission[]): boolean {
+  const set = new Set(a);
+  return set.size === new Set(b).size && b.every((p) => set.has(p));
+}
 
 function PermissionBoxes({
   value,
@@ -36,12 +43,20 @@ function PermissionBoxes({
   );
 }
 
-function RoleForm({ ws, role }: { ws: string; role: Role }) {
+function RoleForm({ ws, role, canEdit }: { ws: string; role: Role; canEdit: boolean }) {
   const client = useQueryClient();
   const [name, setName] = useState(role.name);
   const [permissions, setPermissions] = useState<Permission[]>(role.permissions);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // The form stays mounted across refetches (so "Saved" survives the refetch after saving);
+  // when the stored role changes, the fields follow it.
+  const storedPermissions = role.permissions.join();
+  useEffect(() => {
+    setName(role.name);
+    setPermissions(role.permissions);
+    // role.permissions is a new array on every refetch; storedPermissions tracks its content.
+  }, [role.name, storedPermissions]);
 
   const run = async (work: () => Promise<unknown>) => {
     setError(null);
@@ -57,7 +72,8 @@ function RoleForm({ ws, role }: { ws: string; role: Role }) {
     }
   };
 
-  const changed = name !== role.name || permissions.join() !== role.permissions.join();
+  const changed = name !== role.name || !samePermissions(permissions, role.permissions);
+  const locked = role.archived || !canEdit;
   return (
     <form
       className={role.archived ? "panel role role-archived" : "panel role"}
@@ -77,27 +93,44 @@ function RoleForm({ ws, role }: { ws: string; role: Role }) {
         </span>
       </header>
       <Field label="Name">
-        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} disabled={role.archived} />
+        <input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setSaved(false);
+          }}
+          maxLength={200}
+          disabled={locked}
+        />
       </Field>
-      <PermissionBoxes value={permissions} onChange={setPermissions} disabled={role.archived} />
+      <PermissionBoxes
+        value={permissions}
+        onChange={(next) => {
+          setPermissions(next);
+          setSaved(false);
+        }}
+        disabled={locked}
+      />
       <ErrorNote error={error} />
-      <div className="actions">
-        {role.archived ? (
-          <button type="button" className="btn" onClick={() => void run(() => api.restoreRole(ws, role.id))}>
-            Restore
-          </button>
-        ) : (
-          <>
-            <button type="submit" className="btn btn-primary" disabled={!changed || name.trim() === ""}>
-              Save
+      {canEdit ? (
+        <div className="actions">
+          {role.archived ? (
+            <button type="button" className="btn" onClick={() => void run(() => api.restoreRole(ws, role.id))}>
+              Restore
             </button>
-            <button type="button" className="btn btn-quiet" onClick={() => void run(() => api.archiveRole(ws, role.id))}>
-              Archive
-            </button>
-            {saved ? <span className="muted" role="status">Saved</span> : null}
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              <button type="submit" className="btn btn-primary" disabled={!changed || name.trim() === ""}>
+                Save
+              </button>
+              <button type="button" className="btn btn-quiet" onClick={() => void run(() => api.archiveRole(ws, role.id))}>
+                Archive
+              </button>
+              {saved ? <span className="muted" role="status">Saved</span> : null}
+            </>
+          )}
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -150,6 +183,7 @@ function NewRole({ ws }: { ws: string }) {
 export function Roles() {
   const ws = useWs();
   const roles = useRoles(ws);
+  const isAdmin = useMyPermissions(ws).has("workspace.admin");
   const list = roles.data ?? [];
   const active = list.filter((r) => !r.archived);
   const archived = list.filter((r) => r.archived);
@@ -161,16 +195,17 @@ export function Roles() {
       </p>
       <ErrorNote error={roles.error ? errorText(roles.error) : null} />
       {roles.isPending ? <Loading what="roles" /> : null}
+      {!isAdmin && list.length > 0 ? <p className="muted">Only workspace admins can change roles.</p> : null}
       {active.map((r) => (
-        <RoleForm key={`${r.id}-${r.name}-${r.permissions.join()}`} ws={ws} role={r} />
+        <RoleForm key={r.id} ws={ws} role={r} canEdit={isAdmin} />
       ))}
-      <NewRole ws={ws} />
+      {isAdmin ? <NewRole ws={ws} /> : null}
       {archived.length > 0 ? (
         <section>
           <h2>Archived roles</h2>
           <p className="muted">Archived roles grant nothing and are hidden from pickers. Restore one to use it again.</p>
           {archived.map((r) => (
-            <RoleForm key={`${r.id}-archived`} ws={ws} role={r} />
+            <RoleForm key={`${r.id}-archived`} ws={ws} role={r} canEdit={isAdmin} />
           ))}
         </section>
       ) : null}

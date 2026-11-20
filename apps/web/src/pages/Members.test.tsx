@@ -13,15 +13,32 @@ const role = (key: string, name: string, over: Partial<Role> = {}): Role => ({
   id: `r-${key}`, key, name, permissions: ["project.read"], archived: false, memberCount: 0, ...over,
 });
 
+/** The signed-in person (memberId m0 in fakeApi.me below), an admin unless told otherwise. */
+const me = (admin = true) => ({
+  memberId: "m0", displayName: "Dana", status: "active" as const,
+  roles: admin ? [{ key: "admin", projectId: null }] : [{ key: "dev", projectId: null }],
+});
+/** `list` plus the signed-in admin. */
+const withMe = <T,>(list: T[], admin = true) => [me(admin), ...list];
+
 const renderMembers = () => renderAt("/w/w1/members", <Route path="/w/:ws/members" element={<Members />} />);
 
 beforeEach(() => {
   resetFakeApi();
-  fakeApi.members.mockResolvedValue([
+  fakeApi.me.mockResolvedValue({
+    user: { id: "u0", displayName: "Dana", email: null, identities: [] },
+    memberships: [{ workspaceId: "w1", memberId: "m0", workspaceName: "Acme" }],
+    mayCreateWorkspaces: true,
+  });
+  fakeApi.members.mockResolvedValue(withMe([
     { memberId: "m1", displayName: "Ada", status: "active", roles: [{ key: "dev", projectId: null }] },
     { memberId: "m2", displayName: "Grace", status: "active", roles: [] },
+  ]));
+  fakeApi.roles.mockResolvedValue([
+    role("dev", "Developer"),
+    role("reviewer", "Reviewer"),
+    role("admin", "Admin", { permissions: ["project.read", "workspace.admin"] }),
   ]);
-  fakeApi.roles.mockResolvedValue([role("dev", "Developer"), role("reviewer", "Reviewer")]);
   fakeApi.projects.mockResolvedValue([{ id: "p1", key: "ACME", name: "Acme site" }]);
 });
 
@@ -35,9 +52,9 @@ test("Members: adding a second role to a member calls the roles route with both 
 });
 
 test("Members: a role limited to one project keeps the member's other roles in that project", async () => {
-  fakeApi.members.mockResolvedValue([
+  fakeApi.members.mockResolvedValue(withMe([
     { memberId: "m1", displayName: "Ada", status: "active", roles: [{ key: "dev", projectId: null }, { key: "dev", projectId: "p1" }] },
-  ]);
+  ]));
   renderMembers();
   await userEvent.click(await screen.findByRole("button", { name: "Add role to Ada" }));
   const form = screen.getByRole("form", { name: "Add a role to Ada" });
@@ -48,9 +65,9 @@ test("Members: a role limited to one project keeps the member's other roles in t
 });
 
 test("Members: removing a role chip sends the remaining keys for that scope", async () => {
-  fakeApi.members.mockResolvedValue([
+  fakeApi.members.mockResolvedValue(withMe([
     { memberId: "m1", displayName: "Ada", status: "active", roles: [{ key: "dev", projectId: null }, { key: "reviewer", projectId: null }] },
-  ]);
+  ]));
   renderMembers();
   await userEvent.click(await screen.findByRole("button", { name: "Remove role dev from Ada" }));
   expect(fakeApi.setMemberRoles).toHaveBeenCalledWith("w1", "m1", { roleKeys: ["reviewer"] });
@@ -99,4 +116,18 @@ test("Members: removing a member asks first, then calls the remove route", async
   expect(fakeApi.removeMember).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "Yes, remove" }));
   expect(fakeApi.removeMember).toHaveBeenCalledWith("w1", "m2");
+});
+
+test("Members: without workspace.admin the list shows no role, removal or invite controls", async () => {
+  fakeApi.members.mockResolvedValue(withMe([
+    { memberId: "m1", displayName: "Ada", status: "active", roles: [{ key: "dev", projectId: null }] },
+  ], false));
+  renderMembers();
+  expect(await screen.findByText("Ada")).toBeTruthy();
+  expect(await screen.findByText(/Only workspace admins can change roles/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Add role to Ada" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Remove role dev from Ada" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Remove Ada" })).toBeNull();
+  expect(screen.queryByRole("form", { name: "Invite people" })).toBeNull();
+  expect(fakeApi.invites).not.toHaveBeenCalled();
 });

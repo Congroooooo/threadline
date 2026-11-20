@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { EventRow } from "./api";
-import { describeEvent, mergeEvents, OVERLAP_MS, overlapCursor, uuidFloor } from "./timeline";
+import { describeEvent, mergeEvents, OVERLAP_MS, overlapCursor, uuidFloor, VERBS } from "./timeline";
 
 const at = (iso: string) => new Date(iso).getTime();
 /** A UUID v7-shaped id for a time, with distinguishing low bits. */
@@ -66,4 +66,23 @@ test("describeEvent handles the system actor and unknown types", () => {
   });
   expect(describeEvent(ev("2026-11-20T10:00:00.000Z", 1, { actorKind: "agent", type: "something.new" })).who).toBe("An agent");
   expect(describeEvent(ev("2026-11-20T10:00:00.000Z", 1, { type: "something.new" })).what).toBe("something new");
+});
+
+test("every event type core emits has words, including both handoff answers", () => {
+  const emitted = [
+    "workspace.created", "project.created", "project.config_updated",
+    "task.created", "task.status_changed", "task.progress_reported", "task.dependency_added", "task.dependency_removed",
+    "run.started", "run.finished",
+    "handoff.created", "handoff.accepted", "handoff.needs_changes",
+    "blocker.raised", "blocker.cause_set", "blocker.resolved",
+    "member.added", "member.removed", "member.roles_set",
+    "invite.created", "invite.accepted", "invite.revoked",
+    "agent_token.created", "agent_token.revoked",
+    "role.upserted", "role.archived", "role.restored",
+    "notify.failed",
+  ];
+  expect(Object.keys(VERBS).sort()).toEqual([...emitted].sort());
+  const e = (type: string) => ev("2026-11-20T10:00:00.000Z", 1, { type });
+  expect(describeEvent(e("handoff.accepted")).what).toBe("accepted a handoff");
+  expect(describeEvent(e("handoff.needs_changes")).what).toBe("sent a handoff back for changes");
 });

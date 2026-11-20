@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, Outlet, Route } from "react-router";
 import { beforeEach, expect, test, vi } from "vitest";
+import { ApiError } from "../api";
 import { fakeApi, resetFakeApi } from "../test/fakeApi";
 import { renderAt } from "../test/render";
 import { HOOK_SCRIPT_URL, Tokens } from "./Tokens";
@@ -71,4 +72,23 @@ test("tokens are listed and can be revoked", async () => {
   expect(fakeApi.revokeToken).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "Yes, revoke" }));
   expect(fakeApi.revokeToken).toHaveBeenCalledWith("w1", "a9");
+});
+
+test("a failed revoke is reported while a new token is on screen", async () => {
+  fakeApi.tokens.mockResolvedValue([
+    {
+      id: "a9", memberId: "m1", ownerName: "Ada", name: "CI runner", projectIds: ["p1"],
+      createdAt: "2026-11-01T00:00:00.000Z", lastUsedAt: null, revokedAt: null,
+    },
+  ]);
+  fakeApi.revokeToken.mockRejectedValue(new ApiError(403, "not allowed to revoke this token"));
+  renderAt("/w/w1/tokens", <Route path="/w/:ws/tokens" element={<Tokens />} />);
+  await userEvent.type(await screen.findByLabelText(/Token name/), "Laptop");
+  await userEvent.click(await screen.findByRole("checkbox", { name: /ACME/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+  expect(await screen.findByRole("region", { name: "New token" })).toBeTruthy();
+  await userEvent.click(await screen.findByRole("button", { name: "Revoke CI runner" }));
+  await userEvent.click(screen.getByRole("button", { name: "Yes, revoke" }));
+  expect((await screen.findByRole("alert")).textContent).toMatch(/not allowed to revoke this token/);
+  expect(screen.getByRole("region", { name: "New token" })).toBeTruthy();
 });

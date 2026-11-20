@@ -41,6 +41,8 @@ export type AgentToken = {
   revokedAt: string | null;
 };
 export type ProjectSummary = { id: string; key: string; name: string };
+/** The sign-in options the deployment offers. */
+export type Providers = { github: boolean; gitlab: boolean; local: boolean };
 export type Project = ProjectSummary & { repoUrls: string[]; notifier: { kind: string; configured: true } | null };
 export type TaskView = {
   id: string;
@@ -161,6 +163,7 @@ export const api = {
   me: () => request<Me>("GET", "/api/me"),
   createWorkspace: (name: string) => request<{ workspaceId: string; memberId: string }>("POST", "/api/workspaces", { name }),
   acceptInvite: (code: string) => request<{ workspaceId: string; memberId: string }>("POST", "/api/invites/accept", { code }),
+  providers: () => request<Providers>("GET", "/auth/providers"),
   signInLocal: () => request<Ok>("POST", "/auth/local"),
   signOut: () => request<Ok>("POST", "/auth/sign-out"),
 

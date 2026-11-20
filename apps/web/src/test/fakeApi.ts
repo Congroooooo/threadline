@@ -14,6 +14,7 @@ const defaults: { [K in keyof Api]: () => Awaited<ReturnType<Api[K]>> } = {
   }),
   createWorkspace: () => ({ workspaceId: "w1", memberId: "m1" }),
   acceptInvite: () => ({ workspaceId: "w1", memberId: "m1" }),
+  providers: () => ({ github: true, gitlab: true, local: true }),
   signInLocal: () => ({ ok: true }),
   signOut: () => ({ ok: true }),
   members: () => [],

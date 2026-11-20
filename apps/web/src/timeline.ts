@@ -49,7 +49,9 @@ export function overlapCursor(seen: EventRow[]): string | undefined {
   return uuidFloor(cutoff);
 }
 
-const VERBS: Record<string, string> = {
+/** One entry per event type core emits (packages/core: recordEvent calls, plus notify.failed). */
+export const VERBS: Record<string, string> = {
+  "workspace.created": "created the workspace",
   "project.created": "created the project",
   "project.config_updated": "changed project settings",
   "task.created": "created a task",
@@ -60,7 +62,8 @@ const VERBS: Record<string, string> = {
   "run.started": "started a run",
   "run.finished": "finished a run",
   "handoff.created": "handed work over",
-  "handoff.responded": "answered a handoff",
+  "handoff.accepted": "accepted a handoff",
+  "handoff.needs_changes": "sent a handoff back for changes",
   "blocker.raised": "raised a blocker",
   "blocker.cause_set": "named a blocker's cause",
   "blocker.resolved": "resolved a blocker",

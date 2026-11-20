@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route } from "react-router";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { HandoffView, OpenItems } from "../api";
+import type { BlockerView, HandoffView, OpenItems } from "../api";
 import { fakeApi, quoted, resetFakeApi } from "../test/fakeApi";
 import { renderAt } from "../test/render";
 import { Inbox } from "./Inbox";
@@ -99,4 +99,39 @@ test("evidence links are only links when the scheme is http or https", async () 
   expect(link.getAttribute("href")).toBe("https://git.example.com/acme/pull/7");
   expect(link.getAttribute("rel")).toContain("noopener");
   expect(screen.getByText(/javascript:alert\(1\)/).closest("a")).toBeNull();
+});
+
+test("a handoff card can be used again once its response has finished", async () => {
+  // The server still lists it (e.g. someone else's answer is pending), so the card stays.
+  fakeApi.openItems.mockResolvedValue(items([handoff()]));
+  let finish!: () => void;
+  fakeApi.respondToHandoff.mockImplementation(() => new Promise((r) => (finish = () => r({ ok: true }))));
+  renderInbox();
+  const accept = await screen.findByRole("button", { name: "Accept" });
+  await userEvent.click(accept);
+  expect((accept as HTMLButtonElement).disabled).toBe(true);
+  finish();
+  await waitFor(() => expect((screen.getByRole("button", { name: "Accept" }) as HTMLButtonElement).disabled).toBe(false));
+});
+
+test("resolving a blocker cannot be submitted twice while it is in flight", async () => {
+  const blocker: BlockerView = {
+    id: "b1", taskRef: "ACME-4", observed: quoted("CI is red", "blocker:b1"), cause: null, causeStatus: "none",
+    ownerRole: "frontend", status: "open", createdAt: "2026-11-20T10:00:00.000Z",
+  };
+  fakeApi.openItems.mockResolvedValue({ handoffs: [], blockers: [blocker], tasks: [] });
+  let finish!: () => void;
+  fakeApi.resolveBlocker.mockImplementation(() => new Promise((r) => (finish = () => r({ ok: true }))));
+  renderInbox();
+  // The blocked state is shown by a status tag (no coloured side stripe).
+  expect(within(await screen.findByRole("article", { name: "Blocker on ACME-4" })).getByText("Blocking").className).toBe("tag tag-blocked");
+  await userEvent.click(await screen.findByRole("button", { name: "Resolve" }));
+  await userEvent.type(screen.getByLabelText("How was it resolved?"), "Fixed the runner");
+  const submit = screen.getByRole("button", { name: "Resolve" });
+  await userEvent.click(submit);
+  await userEvent.click(submit);
+  expect(fakeApi.resolveBlocker).toHaveBeenCalledTimes(1);
+  expect((submit as HTMLButtonElement).disabled).toBe(true);
+  finish();
+  await waitFor(() => expect((screen.getByRole("button", { name: "Resolve" }) as HTMLButtonElement).disabled).toBe(false));
 });

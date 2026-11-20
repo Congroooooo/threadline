@@ -22,6 +22,7 @@ function HandoffCard({ ws, projectId, h }: { ws: string; projectId: string; h: H
       await client.invalidateQueries({ queryKey: keys.openItems(ws, projectId) });
     } catch (err) {
       setError(errorText(err));
+    } finally {
       setBusy(false);
     }
   };
@@ -94,6 +95,7 @@ export function BlockerCard({ ws, b }: { ws: string; b: BlockerView }) {
   const [resolving, setResolving] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const trimmed = text.trim();
   return (
     <article className="item item-blocker" aria-label={b.taskRef ? `Blocker on ${b.taskRef}` : "Project blocker"}>
@@ -102,6 +104,7 @@ export function BlockerCard({ ws, b }: { ws: string; b: BlockerView }) {
         <span className="muted">
           owned by {b.ownerRole}, {timeAgo(b.createdAt)}
         </span>
+        {b.status === "open" ? <span className="tag tag-blocked">Blocking</span> : <span className="tag">Resolved</span>}
       </header>
       <p className="prose">
         <Q q={b.observed} />
@@ -118,13 +121,17 @@ export function BlockerCard({ ws, b }: { ws: string; b: BlockerView }) {
             className="stack"
             onSubmit={async (e) => {
               e.preventDefault();
-              if (!trimmed) return;
+              if (!trimmed || busy) return;
+              setBusy(true);
+              setError(null);
               try {
                 await api.resolveBlocker(ws, b.id, trimmed);
                 // Open items, the project's blocker list and task "blocked" markers all change.
                 await client.invalidateQueries({ queryKey: [ws] });
               } catch (err) {
                 setError(errorText(err));
+              } finally {
+                setBusy(false);
               }
             }}
           >
@@ -132,7 +139,7 @@ export function BlockerCard({ ws, b }: { ws: string; b: BlockerView }) {
               <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={10_000} autoFocus />
             </Field>
             <div className="actions">
-              <button type="submit" className="btn btn-primary" disabled={trimmed === ""}>
+              <button type="submit" className="btn btn-primary" disabled={busy || trimmed === ""}>
                 Resolve
               </button>
               <button type="button" className="btn btn-quiet" onClick={() => setResolving(false)}>

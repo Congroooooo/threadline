@@ -1,12 +1,13 @@
 // People in the workspace, their roles (as removable chips), invites and removal.
 //
 // The roles route replaces a member's roles in one scope (workspace-wide, or one project),
-// so adding or removing a chip sends every key the member keeps in that scope.
+// so adding or removing a chip sends every key the member keeps in that scope. Changing
+// roles, removing people and invites are for workspace admins; others see the list only.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Member, type ProjectSummary, type Role } from "../api";
 import { ConfirmButton, CopyButton, Empty, ErrorNote, Field, Loading, timeAgo } from "../components/ui";
-import { errorText, keys, useMembers, useProjects, useRoles, useWs } from "../queries";
+import { errorText, keys, useMembers, useMyPermissions, useProjects, useRoles, useWs } from "../queries";
 
 function keysIn(member: Member, projectId: string | null): string[] {
   return member.roles.filter((r) => r.projectId === projectId).map((r) => r.key);
@@ -164,7 +165,8 @@ export function Members() {
   const members = useMembers(ws);
   const roles = useRoles(ws);
   const projects = useProjects(ws);
-  const invites = useQuery({ queryKey: keys.invites(ws), queryFn: () => api.invites(ws), retry: false });
+  const isAdmin = useMyPermissions(ws).has("workspace.admin");
+  const invites = useQuery({ queryKey: keys.invites(ws), queryFn: () => api.invites(ws), retry: false, enabled: isAdmin });
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -206,22 +208,24 @@ export function Members() {
                   <span key={`${r.key}-${r.projectId ?? "all"}`} className="chip">
                     {r.key}
                     {r.projectId ? <span className="chip-scope"> in {projectKey(r.projectId)}</span> : null}
-                    <button
-                      type="button"
-                      className="chip-x"
-                      aria-label={`Remove role ${r.key}${r.projectId ? ` in ${projectKey(r.projectId)}` : ""} from ${m.displayName}`}
-                      onClick={() =>
-                        void run(() =>
-                          api.setMemberRoles(ws, m.memberId, scopeInput(keysIn(m, r.projectId).filter((k) => k !== r.key), r.projectId)),
-                        )
-                      }
-                    >
-                      ×
-                    </button>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        className="chip-x"
+                        aria-label={`Remove role ${r.key}${r.projectId ? ` in ${projectKey(r.projectId)}` : ""} from ${m.displayName}`}
+                        onClick={() =>
+                          void run(() =>
+                            api.setMemberRoles(ws, m.memberId, scopeInput(keysIn(m, r.projectId).filter((k) => k !== r.key), r.projectId)),
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    ) : null}
                   </span>
                 ))}
               </div>
-              {adding === m.memberId ? (
+              {isAdmin && adding === m.memberId ? (
                 <AddRole
                   member={m}
                   roles={activeRoles}
@@ -235,19 +239,21 @@ export function Members() {
                 />
               ) : null}
             </div>
-            <div className="row-actions">
-              {adding !== m.memberId ? (
-                <button type="button" className="btn" aria-label={`Add role to ${m.displayName}`} onClick={() => setAdding(m.memberId)}>
-                  Add role
-                </button>
-              ) : null}
-              <ConfirmButton
-                label="Remove member"
-                ariaLabel={`Remove ${m.displayName}`}
-                confirmLabel="Yes, remove"
-                onConfirm={() => void run(() => api.removeMember(ws, m.memberId))}
-              />
-            </div>
+            {isAdmin ? (
+              <div className="row-actions">
+                {adding !== m.memberId ? (
+                  <button type="button" className="btn" aria-label={`Add role to ${m.displayName}`} onClick={() => setAdding(m.memberId)}>
+                    Add role
+                  </button>
+                ) : null}
+                <ConfirmButton
+                  label="Remove member"
+                  ariaLabel={`Remove ${m.displayName}`}
+                  confirmLabel="Yes, remove"
+                  onConfirm={() => void run(() => api.removeMember(ws, m.memberId))}
+                />
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -255,40 +261,44 @@ export function Members() {
         <p className="muted">Former members: {former.map((m) => m.displayName).join(", ")}</p>
       ) : null}
 
-      <InvitePanel ws={ws} roles={activeRoles} projects={projectList} />
+      {isAdmin ? <InvitePanel ws={ws} roles={activeRoles} projects={projectList} /> : null}
 
-      <section>
-        <h2>Pending invites</h2>
-        {invites.error ? <p className="muted">Only workspace admins can see invites.</p> : null}
-        {invites.data?.length === 0 ? <Empty>No invites waiting.</Empty> : null}
-        <ul className="rows">
-          {invites.data?.map((i) => (
-            <li key={i.id} className="row">
-              <div className="row-main">
-                <strong>{i.roleKeys.length > 0 ? i.roleKeys.join(", ") : "No roles"}</strong>
-                <span className="muted">
-                  {i.projectId ? `${projectKey(i.projectId)} only` : "All projects"}; created by {i.createdByName}{" "}
-                  {timeAgo(i.createdAt)}; expires {new Date(i.expiresAt).toLocaleDateString()}
-                </span>
-              </div>
-              <ConfirmButton
-                label="Revoke"
-                ariaLabel={`Revoke invite for ${i.roleKeys.join(", ") || "no roles"}`}
-                confirmLabel="Yes, revoke"
-                onConfirm={async () => {
-                  setError(null);
-                  try {
-                    await api.revokeInvite(ws, i.id);
-                    await client.invalidateQueries({ queryKey: keys.invites(ws) });
-                  } catch (err) {
-                    setError(errorText(err));
-                  }
-                }}
-              />
-            </li>
-          ))}
-        </ul>
-      </section>
+      {isAdmin ? (
+        <section>
+          <h2>Pending invites</h2>
+          <ErrorNote error={invites.error ? errorText(invites.error) : null} />
+          {invites.data?.length === 0 ? <Empty>No invites waiting.</Empty> : null}
+          <ul className="rows">
+            {invites.data?.map((i) => (
+              <li key={i.id} className="row">
+                <div className="row-main">
+                  <strong>{i.roleKeys.length > 0 ? i.roleKeys.join(", ") : "No roles"}</strong>
+                  <span className="muted">
+                    {i.projectId ? `${projectKey(i.projectId)} only` : "All projects"}; created by {i.createdByName}{" "}
+                    {timeAgo(i.createdAt)}; expires {new Date(i.expiresAt).toLocaleDateString()}
+                  </span>
+                </div>
+                <ConfirmButton
+                  label="Revoke"
+                  ariaLabel={`Revoke invite for ${i.roleKeys.join(", ") || "no roles"}`}
+                  confirmLabel="Yes, revoke"
+                  onConfirm={async () => {
+                    setError(null);
+                    try {
+                      await api.revokeInvite(ws, i.id);
+                      await client.invalidateQueries({ queryKey: keys.invites(ws) });
+                    } catch (err) {
+                      setError(errorText(err));
+                    }
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <p className="muted">Only workspace admins can change roles, remove people or invite someone.</p>
+      )}
     </div>
   );
 }
