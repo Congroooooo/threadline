@@ -248,7 +248,10 @@ export function getTask(tx: Tx, taskId: string): Promise<TaskRow> {
   return loadTask(tx, taskId);
 }
 
-/** Resolves `ACME-12` (key case-insensitive) or a task id to a task id of `projectId`. */
+/**
+ * Resolves `ACME-12` (key case-insensitive) or a task id to a task id of `projectId`.
+ * Checks no permission: callers must check permission (project.read on `projectId`) first.
+ */
 export async function resolveTaskRef(tx: Tx, projectId: string, refOrId: string): Promise<string> {
   const notFound = () => new NotFoundError("task not found");
   if (typeof projectId !== "string" || !UUID.test(projectId) || typeof refOrId !== "string") throw notFound();
@@ -376,6 +379,7 @@ export async function removeDependency(tx: Tx, actor: Actor, taskId: string, dep
 /**
  * What keeps a task blocked: its dependencies that are not done (ordered by number) and
  * its open blockers. Blocked is computed here, never stored.
+ * Checks no permission: callers must check permission on the task's project first.
  */
 export async function blockedBy(tx: Tx, taskId: string): Promise<{ dependencies: string[]; blockers: string[] }> {
   await loadTask(tx, taskId);
@@ -501,7 +505,7 @@ export function listProgress(tx: Tx, taskId: string): Promise<ProgressNoteRow[]>
 }
 
 /** Rows from `tx.execute`, whichever driver returned them. */
-function rowsOf(result: unknown): unknown[] {
+export function rowsOf(result: unknown): unknown[] {
   if (Array.isArray(result)) return result;
   return (result as { rows?: unknown[] }).rows ?? [];
 }

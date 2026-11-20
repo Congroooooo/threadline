@@ -55,7 +55,7 @@ export {
   normalizeRepoUrl,
   type NotifierConfig,
 } from "./projects.js";
-// getTask, getHandoff and the raw row types stay internal: views arrive in Task 9.
+// getTask, getHandoff and the raw row types stay internal: apps read views from context.ts.
 export {
   TASK_STATUSES,
   EVIDENCE_KINDS,
@@ -77,3 +77,24 @@ export {
   createHandoff, respondToHandoff, raiseBlocker, setBlockerCause, resolveBlocker, getBlocker,
   type BlockerStatus, type CauseStatus, type HandoffStatus,
 } from "./coordination.js";
+export {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  MAX_SEARCH_QUERY,
+  MAX_CONTEXT_PROGRESS,
+  SESSION_CONTEXT_FIRST_LINE,
+  SESSION_CONTEXT_EMPTY,
+  SESSION_CONTEXT_MAX,
+  myOpenItems,
+  getTaskContext,
+  getByRef,
+  search,
+  renderSessionContext,
+  type BlockerView,
+  type HandoffView,
+  type OpenItems,
+  type ProgressView,
+  type SearchHit,
+  type TaskContext,
+  type TaskView,
+} from "./context.js";
