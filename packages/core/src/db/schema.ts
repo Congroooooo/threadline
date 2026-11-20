@@ -88,6 +88,7 @@ export const userIdentities = pgTable(
     provider: text("provider", { enum: ["github", "gitlab", "local"] }).notNull(),
     providerUserId: text("provider_user_id").notNull(),
     userId: uuid("user_id").notNull().references(() => users.id),
+    login: text("login"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique().on(t.provider, t.providerUserId)],

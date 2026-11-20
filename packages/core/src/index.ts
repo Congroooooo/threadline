@@ -36,6 +36,7 @@ export {
   PROVIDERS,
   SESSION_DAYS,
   findOrCreateUser,
+  getUser,
   createSession,
   resolveSession,
   listMemberships,
@@ -52,6 +53,7 @@ export {
   updateProjectConfig,
   findProjectByRepoUrl,
   getProject,
+  listProjects,
   normalizeRepoUrl,
   type NotifierConfig,
 } from "./projects.js";
@@ -87,6 +89,7 @@ export {
   SESSION_CONTEXT_MAX,
   myOpenItems,
   getTaskContext,
+  getTaskContextById,
   getByRef,
   search,
   renderSessionContext,

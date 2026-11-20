@@ -6,6 +6,9 @@ CREATE TABLE user_identities (
   provider text NOT NULL CHECK (provider IN ('github', 'gitlab', 'local')),
   provider_user_id text NOT NULL CHECK (provider_user_id <> ''),
   user_id uuid NOT NULL REFERENCES users (id),
+  -- The provider's current login (GitHub login, GitLab username), refreshed at each sign-in.
+  -- Used only to match WORKSPACE_CREATORS; the stable key is provider_user_id.
+  login text CHECK (login <> ''),
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (provider, provider_user_id)
 );

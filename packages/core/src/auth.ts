@@ -37,10 +37,12 @@ function isUniqueViolation(err: unknown): boolean {
 /**
  * The user signed in through this provider identity, created on first sign-in. Later
  * sign-ins return the same user and leave the stored display name and email unchanged.
+ * `login` (GitHub login, GitLab username) is stored on the identity and refreshed whenever
+ * a sign-in passes one, since providers let people rename themselves.
  */
 export async function findOrCreateUser(
   db: Db,
-  input: { provider: Provider; providerUserId: string; displayName: string; email?: string },
+  input: { provider: Provider; providerUserId: string; displayName: string; email?: string; login?: string },
 ): Promise<string> {
   const { provider } = input;
   if (!PROVIDERS.includes(provider)) throw new ValidationError(`unknown provider: ${String(provider)}`);
@@ -48,32 +50,67 @@ export async function findOrCreateUser(
   if (providerUserId === "") throw new ValidationError("providerUserId is required");
   const displayName = label(input.displayName, "displayName");
   const email = input.email === undefined ? null : cleanText(input.email, "email").trim() || null;
+  const login = input.login === undefined ? null : label(input.login, "login");
 
   const find = async (tx: Tx) => {
     const [row] = await tx
-      .select({ userId: userIdentities.userId })
+      .select({ userId: userIdentities.userId, login: userIdentities.login })
       .from(userIdentities)
       .where(and(eq(userIdentities.provider, provider), eq(userIdentities.providerUserId, providerUserId)));
-    return row?.userId;
+    return row;
+  };
+  const refreshLogin = async (tx: Tx, current: string | null) => {
+    if (login === null || login === current) return;
+    await tx
+      .update(userIdentities)
+      .set({ login })
+      .where(and(eq(userIdentities.provider, provider), eq(userIdentities.providerUserId, providerUserId)));
   };
 
   return withSystem(db, async (tx) => {
     const existing = await find(tx);
-    if (existing) return existing;
+    if (existing) {
+      await refreshLogin(tx, existing.login);
+      return existing.userId;
+    }
     const userId = newId();
     try {
       // In a savepoint, so losing a race to a concurrent first sign-in leaves tx usable.
       await tx.transaction(async (sp) => {
         await sp.insert(users).values({ id: userId, displayName, email });
-        await sp.insert(userIdentities).values({ id: newId(), provider, providerUserId, userId });
+        await sp.insert(userIdentities).values({ id: newId(), provider, providerUserId, userId, login });
       });
       return userId;
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
       const winner = await find(tx);
       if (!winner) throw err;
-      return winner;
+      await refreshLogin(tx, winner.login);
+      return winner.userId;
     }
+  });
+}
+
+/** The user's account and sign-in identities (provider and login), or null when unknown. */
+export async function getUser(db: Db, userId: string): Promise<{
+  id: string;
+  displayName: string;
+  email: string | null;
+  identities: { provider: Provider; login: string | null }[];
+} | null> {
+  if (typeof userId !== "string" || !UUID.test(userId)) return null;
+  return withSystem(db, async (tx) => {
+    const [user] = await tx
+      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(eq(users.id, userId));
+    if (!user) return null;
+    const identities = await tx
+      .select({ provider: userIdentities.provider, login: userIdentities.login })
+      .from(userIdentities)
+      .where(eq(userIdentities.userId, userId))
+      .orderBy(asc(userIdentities.provider), asc(userIdentities.id));
+    return { ...user, identities };
   });
 }
 

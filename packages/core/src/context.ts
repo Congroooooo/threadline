@@ -387,6 +387,16 @@ export async function getTaskContext(tx: Tx, actor: Actor, input: { projectId: s
 }
 
 /**
+ * getTaskContext for a task id alone, in whichever project of the workspace it belongs to
+ * (project.read there is still required). A missing or malformed id is NotFoundError.
+ */
+export async function getTaskContextById(tx: Tx, actor: Actor, taskId: string): Promise<TaskContext> {
+  if (typeof taskId !== "string" || !UUID.test(taskId)) throw new NotFoundError("task not found");
+  const row = await loadTask(tx, taskId);
+  return getTaskContext(tx, actor, { projectId: row.projectId, task: row.id });
+}
+
+/**
  * Tasks, handoffs and blockers of the project whose evidence has exactly this URL (as
  * given, or in the normalised form evidence is stored in). A progress note citing the URL
  * counts for its task.

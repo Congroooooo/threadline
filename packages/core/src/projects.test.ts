@@ -3,7 +3,7 @@ import { type Db, withWorkspace } from "./db/client.js";
 import { assertAllTablesHaveForcedRls, createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
-import { createProject, findProjectByRepoUrl, getProject, normalizeRepoUrl, updateProjectConfig } from "./projects.js";
+import { createProject, findProjectByRepoUrl, getProject, listProjects, normalizeRepoUrl, updateProjectConfig } from "./projects.js";
 import { addMember, createWorkspace, setMemberRoles } from "./tenancy.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
 
@@ -51,6 +51,19 @@ describe("normalizeRepoUrl", () => {
 });
 
 describe("projects", () => {
+  test("listProjects returns the projects the actor can read, by key", async () => {
+    const web = await inWs((tx) => createProject(tx, admin, { key: "WEB", name: "Web" }));
+    const app = await inWs((tx) => createProject(tx, admin, { key: "APP", name: "App" }));
+    expect(await inWs((tx) => listProjects(tx, admin))).toEqual([
+      { id: app, key: "APP", name: "App" },
+      { id: web, key: "WEB", name: "Web" },
+    ]);
+    const scoped = await member(["frontend"], web);
+    expect(await inWs((tx) => listProjects(tx, scoped))).toEqual([{ id: web, key: "WEB", name: "Web" }]);
+    const agent: Actor = { kind: "agent", workspaceId, memberId: admin.memberId, agentId: newId(), projectIds: [app] };
+    expect((await inWs((tx) => listProjects(tx, agent))).map((p) => p.key)).toEqual(["APP"]);
+  });
+
   test("a project is found by any of its repository URLs", async () => {
     const id = await inWs((tx) => createProject(tx, admin, { key: "APP", name: "App" }));
     const other = await inWs((tx) => createProject(tx, admin, { key: "WEB", name: "Web" }));

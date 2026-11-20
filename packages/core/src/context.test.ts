@@ -3,6 +3,7 @@ import { createAgentToken } from "./auth.js";
 import {
   getByRef,
   getTaskContext,
+  getTaskContextById,
   myOpenItems,
   type OpenItems,
   renderSessionContext,
@@ -128,6 +129,14 @@ describe("myOpenItems", () => {
 });
 
 describe("getTaskContext", () => {
+  test("getTaskContextById finds the task's project itself; an unknown id is not found", async () => {
+    const byId = await t.inWs((tx) => getTaskContextById(tx, t.owner, otherTask));
+    expect(byId).toEqual(await t.inWs((tx) => getTaskContext(tx, t.owner, { projectId: t.other, task: otherTask })));
+    await expect(t.inWs((tx) => getTaskContextById(tx, t.owner, newId()))).rejects.toThrow(NotFoundError);
+    await expect(t.inWs((tx) => getTaskContextById(tx, t.owner, "ACME-1"))).rejects.toThrow(NotFoundError);
+    await expect(t.inWs((tx) => getTaskContextById(tx, frontendAgent, otherTask))).rejects.toThrow(ForbiddenError);
+  });
+
   test("every free-text field reaching an agent is quoted", async () => {
     await t.inWs((tx) => reportProgress(tx, t.backendAgent, { taskId: task1, note: "schema done" }));
     const ctx = await t.inWs((tx) => getTaskContext(tx, frontendAgent, { projectId, task: "ACME-1" }));

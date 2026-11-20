@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/db/testing.ts"
+    "./testing": "./src/db/testing.ts",
+    "./testing/global-setup": "./src/db/test-global-setup.ts"
   },
   "scripts": {
     "test": "vitest run",

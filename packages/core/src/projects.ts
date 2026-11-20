@@ -1,12 +1,12 @@
 // Projects and their configuration. A repository maps to exactly one active project per
 // workspace, so findProjectByRepoUrl is unambiguous.
-import { and, arrayContains, arrayOverlaps, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, arrayContains, arrayOverlaps, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Tx } from "./db/client.js";
 import { projectConfig, projects } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
 import { parseHttpUrl } from "./safety.js";
-import { label, requirePermission } from "./tenancy.js";
+import { can, label, requirePermission } from "./tenancy.js";
 import { UUID } from "./tokens.js";
 import { type Actor, NotFoundError, ValidationError } from "./types.js";
 
@@ -212,4 +212,16 @@ export async function getProject(
     repoUrls: row.repoUrls,
     notifier: row.notifierKind === null ? null : { kind: row.notifierKind, configured: true },
   };
+}
+
+/** The active projects the actor can read (project.read), by key. */
+export async function listProjects(tx: Tx, actor: Actor): Promise<{ id: string; key: string; name: string }[]> {
+  const rows = await tx
+    .select({ id: projects.id, key: projects.key, name: projects.name })
+    .from(projects)
+    .where(isNull(projects.archivedAt))
+    .orderBy(asc(projects.key));
+  const out: { id: string; key: string; name: string }[] = [];
+  for (const row of rows) if (await can(tx, actor, "project.read", row.id)) out.push(row);
+  return out;
 }

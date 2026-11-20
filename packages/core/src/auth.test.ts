@@ -4,6 +4,7 @@ import {
   createAgentToken,
   createSession,
   findOrCreateUser,
+  getUser,
   listMemberships,
   resolveAgentToken,
   resolveSession,
@@ -46,6 +47,26 @@ async function teammate(name: string, roleKeys: string[], projectScope?: string)
 }
 
 describe("users and sessions", () => {
+  test("the provider login is stored and follows a renamed account; getUser lists it", async () => {
+    const id = await findOrCreateUser(db, { provider: "github", providerUserId: "7", displayName: "Sam", login: "sam-old" });
+    expect(await findOrCreateUser(db, { provider: "github", providerUserId: "7", displayName: "Sam", login: "Sam-New" })).toBe(id);
+    expect(await getUser(db, id)).toEqual({
+      id,
+      displayName: "Sam",
+      email: null,
+      identities: [{ provider: "github", login: "Sam-New" }],
+    });
+    // A sign-in without a login leaves the stored one alone.
+    await findOrCreateUser(db, { provider: "github", providerUserId: "7", displayName: "Sam" });
+    expect((await getUser(db, id))?.identities).toEqual([{ provider: "github", login: "Sam-New" }]);
+  });
+
+  test("getUser returns null for an unknown or malformed id", async () => {
+    expect(await getUser(db, newId())).toBeNull();
+    expect(await getUser(db, "nope")).toBeNull();
+    expect((await getUser(db, userId))?.identities).toEqual([]);
+  });
+
   test("the same provider identity maps to one user", async () => {
     const a = await findOrCreateUser(db, { provider: "gitlab", providerUserId: "42", displayName: "Sam" });
     const b = await findOrCreateUser(db, { provider: "gitlab", providerUserId: "42", displayName: "Sam B" });
