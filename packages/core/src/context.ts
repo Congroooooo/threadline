@@ -6,10 +6,12 @@
 // come from that project.
 //
 // Every free-text field leaving this module is a Quoted whose source is `<kind>:<id>`.
-// Role fields are role keys. People fields are member display names; an agent is shown as
-// its owning member's display name followed by " (agent)" (the agent identity's own name is
-// not used, so one person never appears under two names), and "unknown (agent)" when no
-// identity row exists. A connection is shown as "connection".
+// Role fields are role keys. People fields are Quoted too, since members write their own
+// display names: a member is `member:<id>` with their display name; an agent is
+// `agent:<id>` with its owning member's display name followed by " (agent)" (the agent
+// identity's own name is not used, so one person never appears under two names), or
+// "unknown (agent)" when no identity row exists; a connection is `connection:<id>` with
+// the text "connection".
 //
 // renderSessionContext turns open items into plain text for the session-start hook. Quoted
 // text is rendered inside double quotes followed by its source, with quotes, backslashes,
@@ -59,7 +61,7 @@ export type TaskView = {
 export type HandoffView = {
   id: string;
   taskRef: string;
-  from: string;
+  from: Quoted;
   toRole: string;
   unassigned: boolean;
   delivered: Quoted;
@@ -81,7 +83,7 @@ export type BlockerView = {
   createdAt: string;
 };
 
-export type ProgressView = { id: string; by: string; note: Quoted; createdAt: string };
+export type ProgressView = { id: string; by: Quoted; note: Quoted; createdAt: string };
 
 export type OpenItems = { handoffs: HandoffView[]; blockers: BlockerView[]; tasks: TaskView[] };
 
@@ -146,9 +148,10 @@ async function displayNames(tx: Tx, refs: ActorRef[]): Promise<Map<string, strin
   return out;
 }
 
-function nameOf(names: Map<string, string>, kind: ActorRef["kind"], id: string): string {
-  if (kind === "connection") return "connection";
-  return names.get(`${kind}:${id}`) ?? (kind === "agent" ? "unknown (agent)" : "unknown");
+function nameOf(names: Map<string, string>, kind: ActorRef["kind"], id: string): Quoted {
+  const source = `${kind}:${id}`;
+  if (kind === "connection") return quote("connection", source);
+  return quote(names.get(source) ?? (kind === "agent" ? "unknown (agent)" : "unknown"), source);
 }
 
 function toExternalRef(e: EvidenceRow): ExternalRefInput {
@@ -459,6 +462,8 @@ export async function search(
   const query = input.query.trim();
   if (query === "") return [];
   const p = input.projectId;
+  // Each `body` below concatenates the same columns as that table's generated `tsv` column
+  // in migrations/0007_search.sql; change them together.
   const result = await tx.execute(sql`
     with q as (select websearch_to_tsquery('simple', ${query}) as q),
     hits as (
@@ -527,7 +532,7 @@ function q(v: Quoted, max = QUOTE_MAX): string {
   return `"${escapeText(v.text, max)}" (${escapeText(v.source, 100)})`;
 }
 
-/** An unquoted value (display names, branches): escaped the same way, never multi-line. */
+/** An unquoted value (branches): escaped the same way, never multi-line. */
 function plain(text: string, max = 100): string {
   return escapeText(text, max);
 }
@@ -539,7 +544,7 @@ function handoffItems(open: OpenItems): Item[] {
   return open.handoffs.map((h) => ({
     id: h.id,
     text:
-      `- ${h.taskRef} from ${plain(h.from)} to ${h.toRole}${h.unassigned ? " (no one holds this role)" : ""}: ` +
+      `- ${h.taskRef} from ${q(h.from, 100)} to ${h.toRole}${h.unassigned ? " (no one holds this role)" : ""}: ` +
       `delivered ${q(h.delivered)}; required action ${q(h.requiredAction)}` +
       (h.knownLimits ? `; known limits ${q(h.knownLimits)}` : ""),
   }));
@@ -592,22 +597,29 @@ function taskContextLines(ctx: TaskContext): string[] {
     if (ctx.blockedBy.blockers.length > 0) parts.push(`${ctx.blockedBy.blockers.length} open blocker(s)`);
     lines.push(`- blocked by ${parts.join(" and ")}`);
   }
-  for (const p of ctx.progress.slice(-3)) lines.push(`- progress by ${plain(p.by)}: ${q(p.note)}`);
+  for (const p of ctx.progress.slice(-3)) lines.push(`- progress by ${q(p.by, 100)}: ${q(p.note)}`);
   return lines;
 }
 
 /**
  * Plain text for the session-start hook: the fixed first line, then the open-item sections
- * (Handoffs, Blockers, Tasks), then the current task when given. At most 6,000 characters:
- * when it would be longer the oldest open items (by id, which is time-ordered) are left out
- * first and the text ends with `(+N more: call my_open_items)`. With no open items and no
- * task it is exactly `Threadline: nothing waiting on you.`
+ * (Handoffs, Blockers, Tasks), then the current task when given. At most 6,000 characters.
+ * When it would be longer, items are left out by section priority, last section first
+ * (Tasks, then Blockers, then Handoffs), and within a section the newest first, so the
+ * oldest, most overdue items survive; the text then ends with
+ * `(+N more: call my_open_items)`. With no open items and no task it is exactly
+ * `Threadline: nothing waiting on you.`
  */
 export function renderSessionContext(items: OpenItems, task?: TaskContext): string {
-  const sections = SESSION_SECTIONS.map((s) => ({ title: s.title, items: s.items(items) }));
+  // Within a section, oldest first (ids are UUID v7, so they sort by creation time).
+  const sections = SESSION_SECTIONS.map((s) => ({
+    title: s.title,
+    items: [...s.items(items)].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+  }));
   const total = sections.reduce((n, s) => n + s.items.length, 0);
   if (total === 0 && task === undefined) return SESSION_CONTEXT_EMPTY;
   const taskBlock = task ? `\n\n${taskContextLines(task).join("\n")}` : "";
+  const footer = (n: number) => `\n\n(+${n} more: call my_open_items)`;
 
   const build = (keep: Set<string>, dropped: number) => {
     let out = SESSION_CONTEXT_FIRST_LINE;
@@ -616,7 +628,7 @@ export function renderSessionContext(items: OpenItems, task?: TaskContext): stri
       if (shown.length > 0) out += `\n\n${s.title}\n${shown.map((i) => i.text).join("\n")}`;
     }
     out += taskBlock;
-    if (dropped > 0) out += `\n\n(+${dropped} more: call my_open_items)`;
+    if (dropped > 0) out += footer(dropped);
     return out;
   };
 
@@ -624,20 +636,25 @@ export function renderSessionContext(items: OpenItems, task?: TaskContext): stri
   const full = build(new Set(all.map((i) => i.id)), 0);
   if (full.length <= SESSION_CONTEXT_MAX) return full;
 
-  // Keep the newest items that fit, leaving room for the footer; everything older goes.
-  const footerReserve = `\n\n(+${total} more: call my_open_items)`.length;
-  let used = SESSION_CONTEXT_FIRST_LINE.length + taskBlock.length + footerReserve;
+  // Take items in priority order (section order, oldest first) while they fit, leaving room
+  // for the footer; the first item that does not fit ends the list.
+  let used = SESSION_CONTEXT_FIRST_LINE.length + taskBlock.length + footer(total).length;
   const keep = new Set<string>();
-  const opened = new Set<string>();
-  const sectionOf = new Map(sections.flatMap((s) => s.items.map((i) => [i.id, s.title] as const)));
-  for (const item of [...all].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))) {
-    const title = sectionOf.get(item.id)!;
-    const cost = item.text.length + 1 + (opened.has(title) ? 0 : title.length + 2);
-    if (used + cost > SESSION_CONTEXT_MAX) break;
-    used += cost;
-    keep.add(item.id);
-    opened.add(title);
+  fill: for (const s of sections) {
+    let opened = false;
+    for (const item of s.items) {
+      const cost = item.text.length + 1 + (opened ? 0 : s.title.length + 2);
+      if (used + cost > SESSION_CONTEXT_MAX) break fill;
+      used += cost;
+      keep.add(item.id);
+      opened = true;
+    }
   }
   const out = build(keep, total - keep.size);
-  return out.length <= SESSION_CONTEXT_MAX ? out : out.slice(0, SESSION_CONTEXT_MAX);
+  // Every part is bounded (quoted fields are clipped, the task block is capped), so this
+  // only fires on a bug; fail loudly rather than cut off the footer.
+  if (out.length > SESSION_CONTEXT_MAX) {
+    throw new Error(`session context is ${out.length} characters, over ${SESSION_CONTEXT_MAX}`);
+  }
+  return out;
 }

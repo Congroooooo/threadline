@@ -3,6 +3,7 @@
 -- uses) built with the 'simple' configuration, so no language-specific stemming, and a GIN
 -- index. Queries use websearch_to_tsquery('simple', ...). The columns are maintained by
 -- Postgres and are not part of the Drizzle schema; core reads them with raw SQL only.
+-- search() in context.ts concatenates the same columns for ts_headline; change them together.
 
 ALTER TABLE tasks ADD COLUMN tsv tsvector GENERATED ALWAYS AS (
   to_tsvector('simple'::regconfig, title || ' ' || coalesce(description, ''))
