@@ -1,19 +1,16 @@
 // Test helpers. Imported as `@threadline/core/testing`, never from the main entry.
-import { PGlite } from "@electric-sql/pglite";
+import { PGlite, type PGliteOptions } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
+import { inject } from "vitest";
 import type { EventInput } from "../events.js";
 import { newId } from "../ids.js";
 import { type Db, withSystem } from "./client.js";
-import { MIGRATIONS_TABLE, type Migration, migrationName, runMigrations } from "./migrate.js";
+import { MIGRATIONS_TABLE, runMigrations } from "./migrate.js";
 import * as schema from "./schema.js";
 import { users, workspaces } from "./schema.js";
+import { migrations } from "./test-migrations.js";
 
-const files = import.meta.glob<string>("./migrations/*.sql", { query: "?raw", import: "default", eager: true });
-
-/** Every SQL file in ./migrations, in name order. */
-export const migrations: Migration[] = Object.entries(files)
-  .map(([path, sql]) => ({ name: migrationName(path), sql }))
-  .sort((a, b) => a.name.localeCompare(b.name));
+export { migrations };
 
 const clients = new WeakMap<Db, PGlite>();
 
@@ -23,11 +20,27 @@ function client(db: Db): PGlite {
   return pg;
 }
 
-let template: Promise<PGlite> | undefined;
+function fromBase64(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
-/** One migrated database per test file; each test gets a clone (much faster than initdb). */
-function migratedTemplate(): Promise<PGlite> {
+type Dump = NonNullable<PGliteOptions["loadDataDir"]>;
+
+let template: Promise<Dump> | undefined;
+const open = new Set<PGlite>();
+
+/**
+ * A dump of a migrated database. The global setup (test-global-setup.ts) migrates once per
+ * test run and provides the dump to every worker; a project without that setup migrates once
+ * per test file instead. Each test then loads its own copy, so tests stay isolated.
+ */
+function migratedTemplate(): Promise<Dump> {
   template ??= (async () => {
+    const provided = inject("pgliteTemplate");
+    if (provided) return new (globalThis as unknown as { Blob: new (parts: Uint8Array[]) => Dump }).Blob([fromBase64(provided)]);
     const pg = new PGlite();
     await runMigrations(
       {
@@ -36,7 +49,9 @@ function migratedTemplate(): Promise<PGlite> {
       },
       migrations,
     );
-    return pg;
+    const dump = await pg.dumpDataDir("gzip");
+    await pg.close();
+    return dump;
   })();
   return template;
 }
@@ -47,12 +62,19 @@ function migratedTemplate(): Promise<PGlite> {
  * through the returned `Db` is subject to row-level security and app_user's grants.
  */
 export async function createTestDb(): Promise<Db> {
-  // clone() is typed as the interface but returns a PGlite instance.
-  const pg = (await (await migratedTemplate()).clone()) as PGlite;
+  const pg = await PGlite.create({ loadDataDir: await migratedTemplate() });
+  open.add(pg);
   await pg.exec("SET ROLE app_user");
   const db: Db = drizzle({ client: pg, schema });
   clients.set(db, pg);
   return db;
+}
+
+/** Closes every database createTestDb opened. Run after each test (see test-cleanup.ts). */
+export async function closeTestDbs(): Promise<void> {
+  const all = [...open];
+  open.clear();
+  await Promise.all(all.map((pg) => pg.close()));
 }
 
 /** Runs one statement as the owner (superuser in PGlite, so RLS does not apply). */
