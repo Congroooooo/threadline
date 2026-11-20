@@ -14,6 +14,7 @@ import { agentIdentities } from "./db/schema.js";
 import { createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
+import { hashSecret } from "./tokens.js";
 import { addMember, createWorkspace, removeMember, setMemberRoles } from "./tenancy.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
 
@@ -208,5 +209,20 @@ describe("agent tokens", () => {
     ).resolves.toBeDefined();
     // The system update matched nothing: system may read tokens, never change them.
     expect(await rawQuery(db, "select count(*)::int as n from agent_identities where revoked_at is null")).toEqual([{ n: 1 }]);
+  });
+
+  test("withSystem reads an agent identity only by the hash named in app.lookup_hash", async () => {
+    const a = await inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [projectId] }));
+    await inWs((tx) => createAgentToken(tx, member, { name: "desktop", projectIds: [projectId] }));
+    expect(await withSystem(db, (tx) => tx.select().from(agentIdentities))).toHaveLength(0);
+    const lookup = (value: string) =>
+      withSystem(db, async (tx) => {
+        await tx.execute(sql`select set_config('app.lookup_hash', ${value}, true)`);
+        return tx.select({ id: agentIdentities.id }).from(agentIdentities);
+      });
+    expect(await lookup("")).toHaveLength(0);
+    expect(await lookup(await hashSecret(a.token))).toEqual([{ id: a.agentId }]);
+    await rawQuery(db, `update agent_identities set token_hash = null where id = '${a.agentId}'`);
+    expect(await lookup(await hashSecret(a.token))).toHaveLength(0);
   });
 });

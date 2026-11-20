@@ -188,7 +188,8 @@ export async function resolveAgentToken(db: Db, token: string): Promise<Actor | 
   if (typeof token !== "string" || !AGENT_TOKEN.test(token)) return null;
   const tokenHash = await hashSecret(token);
   return withSystem(db, async (tx) => {
-    // System may read agent identities (to find the workspace) but not write them.
+    // Opens agent_identities_system_lookup for this one hash: system reads nothing else there.
+    await tx.execute(sql`select set_config('app.lookup_hash', ${tokenHash}, true)`);
     const [row] = await tx
       .select({
         id: agentIdentities.id,

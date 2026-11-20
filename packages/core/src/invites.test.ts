@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, test } from "vitest";
 import { createAgentToken, resolveAgentToken } from "./auth.js";
 import { type Db, withSystem, withWorkspace } from "./db/client.js";
@@ -6,6 +7,7 @@ import { createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
 import { acceptInvite, createInvite, revokeInvite } from "./invites.js";
+import { hashSecret } from "./tokens.js";
 import { addMember, archiveRole, createWorkspace, listMembers, listRoles, removeMember } from "./tenancy.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
 
@@ -95,7 +97,15 @@ describe("invites", () => {
     expect(await acceptInvite(db, { userId: newUser, displayName: "Sam", code })).toEqual({ workspaceId, memberId: sam });
     const m = (await inWs((tx) => listMembers(tx))).find((x) => x.memberId === sam)!;
     expect(m).toMatchObject({ status: "active", roles: [{ key: "frontend", projectId: null }] });
-    expect(await resolveAgentToken(db, token)).not.toBeNull();
+    // A token from before the removal stays dead, and its revocation is recorded.
+    expect(await resolveAgentToken(db, token)).toBeNull();
+    expect(await rawQuery(db, "select count(*)::int as n from agent_identities where revoked_at is null")).toEqual([{ n: 0 }]);
+    const revokedEvents = (await inWs((tx) => listEvents(tx, {}))).filter((e) => e.type === "agent_token.revoked");
+    expect(revokedEvents).toHaveLength(1);
+    expect(revokedEvents[0]).toMatchObject({ actorId: sam, subjectKind: "agent", data: { reason: "member_reactivated" } });
+    // New tokens work as usual.
+    const fresh = await inWs((tx) => createAgentToken(tx, { kind: "member", workspaceId, memberId: sam }, { name: "laptop", projectIds: [projectId] }));
+    expect(await resolveAgentToken(db, fresh.token)).not.toBeNull();
   });
 
   test("accepting records invite.accepted and member.added by the new member", async () => {
@@ -121,8 +131,11 @@ describe("invites", () => {
     const { code } = await inWs((tx) => createInvite(tx, admin, { roleKeys: ["frontend"] }));
     const role = (await inWs((tx) => listRoles(tx))).find((r) => r.key === "frontend")!;
     await inWs((tx) => archiveRole(tx, admin, role.id));
-    await expect(acceptInvite(db, { userId: newUser, displayName: "Sam", code })).rejects.toThrow(ValidationError);
+    const attempt = acceptInvite(db, { userId: newUser, displayName: "Sam", code });
+    await expect(attempt).rejects.toThrow(ValidationError);
+    await expect(attempt).rejects.toThrow(new RegExp(`^${INVALID}$`));
     expect(await rawQuery(db, "select used_at from invites")).toEqual([{ used_at: null }]);
+    expect(await inWs((tx) => listMembers(tx))).toHaveLength(1);
   });
 
   test("only workspace.admin can create invites", async () => {
@@ -174,5 +187,21 @@ describe("invites", () => {
     expect(await withWorkspace(db, other.workspaceId, (tx) => tx.select().from(invites))).toHaveLength(0);
     await withSystem(db, (tx) => tx.update(invites).set({ roleKeys: ["owner"] }));
     expect(await rawQuery(db, "select role_keys from invites")).toEqual([{ role_keys: ["frontend"] }]);
+  });
+
+  test("withSystem reads an invite only by the hash named in app.lookup_hash", async () => {
+    const a = await inWs((tx) => createInvite(tx, admin, { roleKeys: ["frontend"] }));
+    await inWs((tx) => createInvite(tx, admin, { roleKeys: ["backend"] }));
+    expect(await withSystem(db, (tx) => tx.select().from(invites))).toHaveLength(0);
+    const lookup = (value: string) =>
+      withSystem(db, async (tx) => {
+        await tx.execute(sql`select set_config('app.lookup_hash', ${value}, true)`);
+        return tx.select({ id: invites.id }).from(invites);
+      });
+    expect(await lookup("")).toHaveLength(0);
+    expect(await lookup(await hashSecret(a.code))).toEqual([{ id: a.inviteId }]);
+    // A NULL stored hash never matches, whatever the setting.
+    await rawQuery(db, `update invites set code_hash = null where id = '${a.inviteId}'`);
+    expect(await lookup(await hashSecret(a.code))).toHaveLength(0);
   });
 });

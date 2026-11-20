@@ -2,7 +2,7 @@
 // in and accepts it, and becomes a member with the invite's roles.
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { type Db, type Tx, withSystem } from "./db/client.js";
-import { invites, memberRoles, members, users } from "./db/schema.js";
+import { agentIdentities, invites, memberRoles, members, users } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
 import { activeRoleIds, assign, label, requirePermission } from "./tenancy.js";
@@ -78,7 +78,8 @@ export async function acceptInvite(
   return withSystem(db, async (tx) => {
     const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId));
     if (!user) throw new NotFoundError("user not found");
-    // System may read invites (to find the workspace) but not write them.
+    // Opens invites_system_lookup for this one hash: system reads no other invite.
+    await tx.execute(sql`select set_config('app.lookup_hash', ${codeHash}, true)`);
     const [invite] = await tx
       .select({ id: invites.id, workspaceId: invites.workspaceId, roleKeys: invites.roleKeys, projectId: invites.projectId })
       .from(invites)
@@ -103,20 +104,42 @@ export async function acceptInvite(
       .returning({ id: invites.id });
     if (claimed.length === 0) throw invalid();
 
-    // Roles archived since the invite was made fail here and roll the claim back.
-    const roleIds = (await activeRoleIds(tx, invite.roleKeys)).map((r) => r.id);
+    // Roles archived since the invite was made fail here and roll the claim back. The
+    // caller is not a member yet, so they get the uniform message, not the role keys.
+    let roleIds: string[];
+    try {
+      roleIds = (await activeRoleIds(tx, invite.roleKeys)).map((r) => r.id);
+    } catch (err) {
+      if (err instanceof ValidationError) throw invalid();
+      throw err;
+    }
+    const actor: Actor = { kind: "member", workspaceId, memberId };
     if (existing) {
       await tx.update(members).set({ status: "active", displayName }).where(eq(members.id, memberId));
       await tx
         .update(memberRoles)
         .set({ revokedAt: sql`now()` })
         .where(and(eq(memberRoles.memberId, memberId), isNull(memberRoles.revokedAt)));
+      // Tokens made before the removal stay dead: one leaked back then must not revive.
+      const revoked = await tx
+        .update(agentIdentities)
+        .set({ revokedAt: sql`now()` })
+        .where(and(eq(agentIdentities.memberId, memberId), isNull(agentIdentities.revokedAt)))
+        .returning({ id: agentIdentities.id });
+      for (const { id } of revoked) {
+        await recordEvent(tx, {
+          actor,
+          type: "agent_token.revoked",
+          subjectKind: "agent",
+          subjectId: id,
+          data: { reason: "member_reactivated" },
+        });
+      }
     } else {
       await tx.insert(members).values({ id: memberId, workspaceId, userId: input.userId, displayName });
     }
     await assign(tx, workspaceId, memberId, roleIds, invite.projectId);
 
-    const actor: Actor = { kind: "member", workspaceId, memberId };
     const scope = invite.projectId !== null ? { projectId: invite.projectId } : {};
     await recordEvent(tx, {
       actor,

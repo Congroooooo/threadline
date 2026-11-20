@@ -67,25 +67,33 @@ CREATE POLICY sessions_system ON sessions
   USING (current_setting('app.system', true) = 'on')
   WITH CHECK (current_setting('app.system', true) = 'on');
 
--- Workspace tables. withSystem may additionally READ agent identities and invites so a
--- token or code can be resolved before its workspace is known. It may not write them:
--- resolution then sets app.workspace_id to the row's workspace and writes under the
--- workspace policy (last_used_at, claiming an invite).
+-- Workspace tables. withSystem may additionally READ the one agent identity or invite
+-- whose hash it names in app.lookup_hash (set transaction-local by resolveAgentToken and
+-- acceptInvite only), so a token or code can be resolved before its workspace is known.
+-- An absent or empty setting, or a NULL stored hash, matches nothing. System may not write
+-- these tables: resolution then sets app.workspace_id to the row's workspace and writes
+-- under the workspace policy (last_used_at, claiming an invite).
 ALTER TABLE agent_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_identities FORCE ROW LEVEL SECURITY;
 CREATE POLICY agent_identities_workspace ON agent_identities
   USING (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid)
   WITH CHECK (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid);
-CREATE POLICY agent_identities_system_read ON agent_identities FOR SELECT
-  USING (current_setting('app.system', true) = 'on');
+CREATE POLICY agent_identities_system_lookup ON agent_identities FOR SELECT
+  USING (
+    current_setting('app.system', true) = 'on'
+    AND token_hash = NULLIF(current_setting('app.lookup_hash', true), '')
+  );
 
 ALTER TABLE invites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invites FORCE ROW LEVEL SECURITY;
 CREATE POLICY invites_workspace ON invites
   USING (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid)
   WITH CHECK (workspace_id = NULLIF(current_setting('app.workspace_id', true), '')::uuid);
-CREATE POLICY invites_system_read ON invites FOR SELECT
-  USING (current_setting('app.system', true) = 'on');
+CREATE POLICY invites_system_lookup ON invites FOR SELECT
+  USING (
+    current_setting('app.system', true) = 'on'
+    AND code_hash = NULLIF(current_setting('app.lookup_hash', true), '')
+  );
 
 -- listMemberships: withSystem may read one user's own member rows, named by app.user_id.
 CREATE POLICY members_system_own ON members FOR SELECT
