@@ -5,15 +5,39 @@ export const MAX_TEXT = 10_000;
 const REDACTED = "[REDACTED]";
 
 const TOKEN_PATTERNS: RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  // PEM private keys, including a block cut off before its END line (redact to end of text).
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g,
   /glpat-[A-Za-z0-9_-]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{20,}/g,
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
   /AKIA[A-Z0-9]{16}/g,
   /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
   /xox[baprs]-[A-Za-z0-9-]+/g,
+  // Anthropic (sk-ant-...) and OpenAI-style (sk-..., sk-proj-...) API keys.
+  /\bsk-[A-Za-z0-9_-]{20,}/g,
+  /https?:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_/-]+/gi,
 ];
 
-const KEY_VALUE = /(password|passwd|secret|token|api[_-]?key)(\s*[=:]\s*)\S+/gi;
+/** scheme://user:password@host — keep everything but the password. */
+const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:)([^\s@/]+)@/gi;
+
+/** `Authorization: Bearer <opaque>` — any token shape, as long as it looks like one (8+ chars, has a digit). */
+const BEARER = /\b(Bearer\s+)(?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{8,}=*/gi;
+
+/**
+ * key=value, key: value, "key": "value" and 'key': 'value' where the key name contains a
+ * secret-ish word (client_secret, private_key, access_token, DB_PASSWORD, ...). Password keys
+ * redact any value; other keys only redact a value that looks like a secret (8+ chars, no
+ * spaces), so prose such as "token: expired" is left alone.
+ */
+const SECRET_KEY = String.raw`[A-Za-z0-9_-]*?(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)[A-Za-z0-9_-]*`;
+const KEY_VALUE = new RegExp(String.raw`(["']?)\b(${SECRET_KEY})\1(\s*[=:]\s*)(["']?)([^\s"',;}]+)`, "gi");
+
+function redactKeyValue(match: string, q1: string, key: string, sep: string, q2: string, value: string): string {
+  const isPassword = /pass(?:word|wd)/i.test(key);
+  if (!isPassword && value.length < 8) return match;
+  return `${q1}${key}${q1}${sep}${q2}${REDACTED}`;
+}
 
 export function capText(text: string, field: string): string {
   if (text.length > MAX_TEXT) {
@@ -25,7 +49,9 @@ export function capText(text: string, field: string): string {
 export function redactSecrets(text: string): string {
   let out = text;
   for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, REDACTED);
-  return out.replace(KEY_VALUE, `$1$2${REDACTED}`);
+  out = out.replace(URL_CREDENTIALS, `$1${REDACTED}@`);
+  out = out.replace(BEARER, `$1${REDACTED}`);
+  return out.replace(KEY_VALUE, redactKeyValue);
 }
 
 export function cleanText(text: string, field: string): string {
