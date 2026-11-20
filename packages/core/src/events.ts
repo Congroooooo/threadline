@@ -15,7 +15,8 @@ export type EventInput = {
   data?: Record<string, unknown>;
 };
 
-function actorId(actor: Actor): string {
+/** The id of whoever acts: the member, the agent or the connection. */
+export function actorId(actor: Actor): string {
   switch (actor.kind) {
     case "member":
       return actor.memberId;

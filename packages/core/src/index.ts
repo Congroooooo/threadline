@@ -55,3 +55,22 @@ export {
   normalizeRepoUrl,
   type NotifierConfig,
 } from "./projects.js";
+// getTask, getHandoff and the raw row types stay internal: views arrive in Task 9.
+export {
+  TASK_STATUSES,
+  EVIDENCE_KINDS,
+  MAX_DEPENDENCIES,
+  MAX_EVIDENCE,
+  createTask,
+  setTaskStatus,
+  addDependency,
+  removeDependency,
+  blockedBy,
+  resolveTaskRef,
+  startRun,
+  finishRun,
+  reportProgress,
+  type TaskStatus,
+  type RunStatus,
+} from "./work.js";
+export { createHandoff, respondToHandoff, type HandoffStatus } from "./coordination.js";

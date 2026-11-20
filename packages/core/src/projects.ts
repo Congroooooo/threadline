@@ -5,6 +5,7 @@ import type { Tx } from "./db/client.js";
 import { projectConfig, projects } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
+import { parseHttpUrl } from "./safety.js";
 import { label, requirePermission } from "./tenancy.js";
 import { UUID } from "./tokens.js";
 import { type Actor, NotFoundError, ValidationError } from "./types.js";
@@ -63,21 +64,8 @@ function parseNotifier(n: NotifierConfig): NotifierConfig {
   if (n === null || typeof n !== "object" || (n.kind !== "mattermost" && n.kind !== "slack")) {
     throw new ValidationError("notifier kind must be mattermost or slack");
   }
-  if (typeof n.webhookUrl !== "string" || n.webhookUrl.length > MAX_URL_LENGTH * 2) {
-    throw new ValidationError("notifier webhookUrl must be an absolute https URL");
-  }
-  const bad = () => new ValidationError("notifier webhookUrl must be an absolute https URL");
-  if (n.webhookUrl.includes("\\") || /\s/.test(n.webhookUrl)) throw bad();
-  let u: InstanceType<typeof URL>;
-  try {
-    u = new URL(n.webhookUrl);
-  } catch {
-    throw bad();
-  }
-  if (u.username !== "" || u.password !== "") throw bad();
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
-  if (!(u.protocol === "https:" || (u.protocol === "http:" && local))) throw bad();
-  return { kind: n.kind, webhookUrl: u.href };
+  const webhookUrl = parseHttpUrl(n.webhookUrl, "notifier webhookUrl", { maxLength: MAX_URL_LENGTH * 2, allowHttp: "local" });
+  return { kind: n.kind, webhookUrl };
 }
 
 /** NotFoundError unless every id is an existing, non-archived project of this workspace. */

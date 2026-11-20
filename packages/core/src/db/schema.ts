@@ -1,4 +1,4 @@
-import { index, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 import type { Permission } from "../types.js";
 
 // Column shapes only. Row-level security, policies and grants live in the
@@ -159,3 +159,99 @@ export const projectConfig = pgTable("project_config", {
 });
 
 export type ProjectRow = typeof projects.$inferSelect;
+
+const ACTOR_KINDS = ["member", "agent", "connection"] as const;
+
+/** "Blocked" is computed from dependencies, never stored. createdBy is a member id. */
+export const tasks = pgTable("tasks", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  projectId: uuid("project_id").notNull(),
+  number: integer("number").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status", { enum: ["todo", "in_progress", "in_review", "done"] }).notNull().default("todo"),
+  ownerRoleId: uuid("owner_role_id").notNull(),
+  branch: text("branch"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Never deleted: removedAt is set instead. */
+export const taskDependencies = pgTable("task_dependencies", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  projectId: uuid("project_id").notNull(),
+  taskId: uuid("task_id").notNull(),
+  dependsOnTaskId: uuid("depends_on_task_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+});
+
+export const runs = pgTable("runs", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  taskId: uuid("task_id").notNull(),
+  actorKind: text("actor_kind", { enum: ACTOR_KINDS }).notNull(),
+  actorId: uuid("actor_id").notNull(),
+  status: text("status", { enum: ["running", "succeeded", "failed", "cancelled"] }).notNull().default("running"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+/** Append-only. */
+export const progressNotes = pgTable("progress_notes", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  taskId: uuid("task_id").notNull(),
+  runId: uuid("run_id"),
+  note: text("note").notNull(),
+  actorKind: text("actor_kind", { enum: ACTOR_KINDS }).notNull(),
+  actorId: uuid("actor_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Append-only. External things attached to a task, handoff or progress note. */
+export const evidence = pgTable("evidence", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  projectId: uuid("project_id").notNull(),
+  subjectKind: text("subject_kind", { enum: ["task", "handoff", "progress"] }).notNull(),
+  subjectId: uuid("subject_id").notNull(),
+  kind: text("kind", {
+    enum: ["change_request", "commit", "pipeline_run", "deployment", "ticket", "file", "message"],
+  }).notNull(),
+  url: text("url").notNull(),
+  externalId: text("external_id"),
+  version: text("version"),
+  connectionId: uuid("connection_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Unique on (workspace_id, idempotency_key) where the key is set. */
+export const handoffs = pgTable("handoffs", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  projectId: uuid("project_id").notNull(),
+  taskId: uuid("task_id").notNull(),
+  fromActorKind: text("from_actor_kind", { enum: ACTOR_KINDS }).notNull(),
+  fromActorId: uuid("from_actor_id").notNull(),
+  toRoleId: uuid("to_role_id").notNull(),
+  delivered: text("delivered").notNull(),
+  requiredAction: text("required_action").notNull(),
+  knownLimits: text("known_limits"),
+  status: text("status", { enum: ["pending", "accepted", "needs_changes"] }).notNull().default("pending"),
+  idempotencyKey: text("idempotency_key"),
+  respondedBy: uuid("responded_by"),
+  responseNote: text("response_note"),
+  respondedAt: timestamp("responded_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type TaskRow = typeof tasks.$inferSelect;
+export type TaskDependencyRow = typeof taskDependencies.$inferSelect;
+export type RunRow = typeof runs.$inferSelect;
+export type ProgressNoteRow = typeof progressNotes.$inferSelect;
+export type EvidenceRow = typeof evidence.$inferSelect;
+export type HandoffRow = typeof handoffs.$inferSelect;
