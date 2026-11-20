@@ -217,7 +217,7 @@ export const evidence = pgTable("evidence", {
   id: uuid("id").primaryKey(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
   projectId: uuid("project_id").notNull(),
-  subjectKind: text("subject_kind", { enum: ["task", "handoff", "progress"] }).notNull(),
+  subjectKind: text("subject_kind", { enum: ["task", "handoff", "progress", "blocker"] }).notNull(),
   subjectId: uuid("subject_id").notNull(),
   kind: text("kind", {
     enum: ["change_request", "commit", "pipeline_run", "deployment", "ticket", "file", "message"],
@@ -249,9 +249,30 @@ export const handoffs = pgTable("handoffs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const blockers = pgTable("blockers", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  projectId: uuid("project_id").notNull(),
+  taskId: uuid("task_id"),
+  observed: text("observed").notNull(),
+  cause: text("cause"),
+  causeStatus: text("cause_status", { enum: ["none", "suspected", "verified"] }).notNull().default("none"),
+  causeVerifiedBy: uuid("cause_verified_by"),
+  ownerRoleId: uuid("owner_role_id").notNull(),
+  status: text("status", { enum: ["open", "resolved"] }).notNull().default("open"),
+  raisedByKind: text("raised_by_kind", { enum: ACTOR_KINDS }).notNull(),
+  raisedById: uuid("raised_by_id").notNull(),
+  resolvedByKind: text("resolved_by_kind", { enum: ACTOR_KINDS }),
+  resolvedBy: uuid("resolved_by"),
+  resolution: text("resolution"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
 export type TaskRow = typeof tasks.$inferSelect;
 export type TaskDependencyRow = typeof taskDependencies.$inferSelect;
 export type RunRow = typeof runs.$inferSelect;
 export type ProgressNoteRow = typeof progressNotes.$inferSelect;
 export type EvidenceRow = typeof evidence.$inferSelect;
 export type HandoffRow = typeof handoffs.$inferSelect;
+export type BlockerRow = typeof blockers.$inferSelect;

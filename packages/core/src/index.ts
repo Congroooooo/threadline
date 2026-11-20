@@ -73,4 +73,7 @@ export {
   type TaskStatus,
   type RunStatus,
 } from "./work.js";
-export { createHandoff, respondToHandoff, type HandoffStatus } from "./coordination.js";
+export {
+  createHandoff, respondToHandoff, raiseBlocker, setBlockerCause, resolveBlocker, getBlocker,
+  type BlockerStatus, type CauseStatus, type HandoffStatus,
+} from "./coordination.js";

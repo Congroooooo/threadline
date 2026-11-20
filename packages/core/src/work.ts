@@ -7,6 +7,7 @@
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Tx } from "./db/client.js";
 import {
+  blockers as blockersTable,
   evidence,
   type EvidenceRow,
   progressNotes,
@@ -145,7 +146,7 @@ export function listEvidence(tx: Tx, subjectKind: EvidenceRow["subjectKind"], su
 }
 
 /** Locks the project row (serialising numbering and dependency edits) and returns its key. */
-async function lockActiveProject(tx: Tx, projectId: string): Promise<string> {
+export async function lockActiveProject(tx: Tx, projectId: string): Promise<string> {
   const [p] = await tx
     .select({ key: projects.key, archivedAt: projects.archivedAt })
     .from(projects)
@@ -384,10 +385,12 @@ export async function blockedBy(tx: Tx, taskId: string): Promise<{ dependencies:
     .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId))
     .where(and(eq(taskDependencies.taskId, taskId), isNull(taskDependencies.removedAt), ne(tasks.status, "done")))
     .orderBy(asc(tasks.number));
-  // SEAM (Task 8): blockers are not stored yet. Task 8 fills this with the ids of the task's
-  // open blockers; callers already treat a non-empty list as blocked.
-  const blockers: string[] = [];
-  return { dependencies: deps.map((d) => d.id), blockers };
+  const open = await tx
+    .select({ id: blockersTable.id })
+    .from(blockersTable)
+    .where(and(eq(blockersTable.taskId, taskId), eq(blockersTable.status, "open")))
+    .orderBy(asc(blockersTable.id));
+  return { dependencies: deps.map((d) => d.id), blockers: open.map((b) => b.id) };
 }
 
 // ---------------------------------------------------------------------------------------

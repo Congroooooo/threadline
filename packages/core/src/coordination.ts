@@ -4,15 +4,18 @@
 // because handoff.ack is HUMAN_ONLY.
 import { and, eq, sql } from "drizzle-orm";
 import type { Tx } from "./db/client.js";
-import { handoffs, type HandoffRow } from "./db/schema.js";
+import { blockers, type BlockerRow, handoffs, type HandoffRow } from "./db/schema.js";
 import { actorId, recordEvent } from "./events.js";
 import { newId } from "./ids.js";
 import { label, membersWithRole, requirePermission } from "./tenancy.js";
 import { UUID } from "./tokens.js";
 import { type Actor, type ExternalRefInput, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
-import { attachEvidence, loadTask, optionalText, parseEvidence, requireActiveRole } from "./work.js";
+import { attachEvidence, loadTask, lockActiveProject, optionalText, parseEvidence, requireActiveRole } from "./work.js";
 
-export type { HandoffRow };
+export type { BlockerRow, HandoffRow };
+
+export type BlockerStatus = "open" | "resolved";
+export type CauseStatus = "none" | "suspected" | "verified";
 
 export type HandoffStatus = "pending" | "accepted" | "needs_changes";
 
@@ -159,5 +162,130 @@ export async function respondToHandoff(
     subjectId: h.id,
     projectId: h.projectId,
     data: { taskId: h.taskId, toRoleId: h.toRoleId, status: input.response },
+  });
+}
+
+// ---------------------------------------------------------------------------------------
+// Blockers: what stands in the way of a project or one of its tasks. All writes need
+// blocker.write in the project (connections hold it everywhere). Only a member may mark a
+// cause verified; agents and connections can only suspect.
+
+/** The raw blocker row, or NotFoundError. For use inside core; views come in Task 9. */
+export async function getBlocker(tx: Tx, blockerId: string, lock = false): Promise<BlockerRow> {
+  if (typeof blockerId !== "string" || !UUID.test(blockerId)) throw new NotFoundError("blocker not found");
+  const q = tx.select().from(blockers).where(eq(blockers.id, blockerId));
+  const [row] = lock ? await q.for("update") : await q;
+  if (!row) throw new NotFoundError("blocker not found");
+  return row;
+}
+
+/**
+ * Raises a blocker on a project, or on one of its tasks when `taskId` is given. `observed`
+ * is what was seen; a `suspectedCause` makes the cause status `suspected`, otherwise `none`.
+ * `ownerRoleId` must be an active role. Returns the blocker id.
+ */
+export async function raiseBlocker(
+  tx: Tx,
+  actor: Actor,
+  input: {
+    projectId: string;
+    taskId?: string;
+    observed: string;
+    suspectedCause?: string;
+    ownerRoleId: string;
+    evidence?: ExternalRefInput[];
+  },
+): Promise<string> {
+  if (typeof input.projectId !== "string" || !UUID.test(input.projectId)) throw new NotFoundError("project not found");
+  await requirePermission(tx, actor, "blocker.write", input.projectId);
+  const observed = label(input.observed, "observed");
+  const cause = optionalText(input.suspectedCause, "suspectedCause");
+  await requireActiveRole(tx, input.ownerRoleId, "ownerRoleId");
+  const items = parseEvidence(input.evidence, actor);
+  await lockActiveProject(tx, input.projectId);
+  let taskId: string | null = null;
+  if (input.taskId !== undefined && input.taskId !== null) {
+    const task = await loadTask(tx, input.taskId);
+    if (task.projectId !== input.projectId) throw new ValidationError("taskId must belong to projectId");
+    taskId = task.id;
+  }
+  const causeStatus: CauseStatus = cause === null ? "none" : "suspected";
+  const id = newId();
+  await tx.insert(blockers).values({
+    id,
+    workspaceId: actor.workspaceId,
+    projectId: input.projectId,
+    taskId,
+    observed,
+    cause,
+    causeStatus,
+    ownerRoleId: input.ownerRoleId,
+    raisedByKind: actor.kind,
+    raisedById: actorId(actor),
+  });
+  const evidenceIds = await attachEvidence(tx, actor, input.projectId, "blocker", id, items);
+  await recordEvent(tx, {
+    actor,
+    type: "blocker.raised",
+    subjectKind: "blocker",
+    subjectId: id,
+    projectId: input.projectId,
+    data: { taskId, ownerRoleId: input.ownerRoleId, causeStatus, evidenceIds },
+  });
+  return id;
+}
+
+/**
+ * Records the cause of an open blocker as suspected or, with `verified: true`, verified.
+ * Verifying is for members only.
+ */
+export async function setBlockerCause(
+  tx: Tx,
+  actor: Actor,
+  input: { blockerId: string; cause: string; verified: boolean },
+): Promise<void> {
+  const b = await getBlocker(tx, input.blockerId, true);
+  await requirePermission(tx, actor, "blocker.write", b.projectId);
+  if (typeof input.verified !== "boolean") throw new ValidationError("verified must be true or false");
+  if (input.verified && actor.kind !== "member") throw new ForbiddenError("only a member may verify a cause");
+  const cause = label(input.cause, "cause");
+  if (b.status !== "open") throw new ValidationError("blocker is already resolved");
+  const causeStatus: CauseStatus = input.verified ? "verified" : "suspected";
+  await tx
+    .update(blockers)
+    .set({ cause, causeStatus, causeVerifiedBy: input.verified && actor.kind === "member" ? actor.memberId : null })
+    .where(eq(blockers.id, b.id));
+  await recordEvent(tx, {
+    actor,
+    type: "blocker.cause_set",
+    subjectKind: "blocker",
+    subjectId: b.id,
+    projectId: b.projectId,
+    data: { taskId: b.taskId, causeStatus },
+  });
+}
+
+/** Resolves an open blocker with a note on how. A blocker is resolved once. */
+export async function resolveBlocker(
+  tx: Tx,
+  actor: Actor,
+  input: { blockerId: string; resolution: string },
+): Promise<void> {
+  const b = await getBlocker(tx, input.blockerId, true);
+  await requirePermission(tx, actor, "blocker.write", b.projectId);
+  const resolution = label(input.resolution, "resolution");
+  const updated = await tx
+    .update(blockers)
+    .set({ status: "resolved", resolution, resolvedByKind: actor.kind, resolvedBy: actorId(actor), resolvedAt: sql`now()` })
+    .where(and(eq(blockers.id, b.id), eq(blockers.status, "open")))
+    .returning({ id: blockers.id });
+  if (updated.length === 0) throw new ValidationError("blocker is already resolved");
+  await recordEvent(tx, {
+    actor,
+    type: "blocker.resolved",
+    subjectKind: "blocker",
+    subjectId: b.id,
+    projectId: b.projectId,
+    data: { taskId: b.taskId, status: "resolved" },
   });
 }
