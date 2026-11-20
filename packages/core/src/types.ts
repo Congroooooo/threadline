@@ -10,6 +10,12 @@ export type Permission =
   | "decision.propose" | "decision.approve"          // used from Phase 4
   | "task.accept" | "workspace.admin";
 
+/** Every permission, in declaration order. */
+export const PERMISSIONS: readonly Permission[] = [
+  "project.read", "task.write", "handoff.create", "handoff.ack", "contract.ack", "blocker.write",
+  "requirement.propose", "requirement.approve", "decision.propose", "decision.approve", "task.accept", "workspace.admin",
+];
+
 export const HUMAN_ONLY: Permission[] =
   ["handoff.ack", "contract.ack", "requirement.approve", "decision.approve", "task.accept", "workspace.admin"];
 

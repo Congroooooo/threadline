@@ -6,7 +6,7 @@ import { newId } from "../ids.js";
 import { type Db, withSystem } from "./client.js";
 import { MIGRATIONS_TABLE, type Migration, migrationName, runMigrations } from "./migrate.js";
 import * as schema from "./schema.js";
-import { workspaces } from "./schema.js";
+import { users, workspaces } from "./schema.js";
 
 const files = import.meta.glob<string>("./migrations/*.sql", { query: "?raw", import: "default", eager: true });
 
@@ -90,6 +90,13 @@ export async function seedTwoWorkspaces(db: Db): Promise<[string, string]> {
     ]),
   );
   return [a, b];
+}
+
+/** Creates a user account (Task 5 adds findOrCreateUser) and returns its id. */
+export async function seedUser(db: Db, displayName = "Test User"): Promise<string> {
+  const id = newId();
+  await withSystem(db, (tx) => tx.insert(users).values({ id, displayName }));
+  return id;
 }
 
 /** An event by a member of `workspaceId`. */
