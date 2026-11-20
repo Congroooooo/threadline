@@ -92,7 +92,7 @@ export async function seedTwoWorkspaces(db: Db): Promise<[string, string]> {
   return [a, b];
 }
 
-/** Creates a user account (Task 5 adds findOrCreateUser) and returns its id. */
+/** Creates a user account without a sign-in identity (see findOrCreateUser) and returns its id. */
 export async function seedUser(db: Db, displayName = "Test User"): Promise<string> {
   const id = newId();
   await withSystem(db, (tx) => tx.insert(users).values({ id, displayName }));

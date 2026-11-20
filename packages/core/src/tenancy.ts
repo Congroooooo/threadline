@@ -43,13 +43,13 @@ const TEMPLATE_NAMES: Record<keyof typeof ROLE_TEMPLATES, string> = {
 
 export const ROLE_KEY = /^[a-z][a-z0-9_]{1,30}$/;
 
-function label(text: string, field: string): string {
+export function label(text: string, field: string): string {
   const out = cleanText(text, field).trim();
   if (out === "") throw new ValidationError(`${field} is required`);
   return out;
 }
 
-function isForeignKeyViolation(err: unknown): boolean {
+export function isForeignKeyViolation(err: unknown): boolean {
   for (let e: any = err; e; e = e.cause) if (e.code === "23503") return true;
   return false;
 }
@@ -182,7 +182,7 @@ export function createWorkspace(
 }
 
 /** Resolves role keys to ids; every key must name a role that is not archived. */
-async function activeRoleIds(tx: Tx, roleKeys: string[]): Promise<{ id: string; key: string }[]> {
+export async function activeRoleIds(tx: Tx, roleKeys: string[]): Promise<{ id: string; key: string }[]> {
   const keys = [...new Set(roleKeys)];
   if (keys.length === 0) return [];
   const rows = await tx
@@ -197,7 +197,7 @@ async function activeRoleIds(tx: Tx, roleKeys: string[]): Promise<{ id: string; 
   return usable.map(({ id, key }) => ({ id, key }));
 }
 
-async function assign(
+export async function assign(
   tx: Tx,
   workspaceId: string,
   memberId: string,
@@ -296,7 +296,7 @@ export async function setMemberRoles(
   });
 }
 
-/** Marks the member removed. Their agent tokens stop resolving (Task 5). */
+/** Marks the member removed. Their agent tokens stop resolving (see resolveAgentToken). */
 export async function removeMember(tx: Tx, actor: Actor, memberId: string): Promise<void> {
   await requirePermission(tx, actor, "workspace.admin");
   const [m] = await tx.select({ status: members.status }).from(members).where(eq(members.id, memberId));

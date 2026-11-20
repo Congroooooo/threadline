@@ -80,3 +80,56 @@ export type EventRow = typeof events.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type MemberRow = typeof members.$inferSelect;
 export type RoleRow = typeof roles.$inferSelect;
+
+export const userIdentities = pgTable(
+  "user_identities",
+  {
+    id: uuid("id").primaryKey(),
+    provider: text("provider", { enum: ["github", "gitlab", "local"] }).notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique().on(t.provider, t.providerUserId)],
+);
+
+/** Keyed by the SHA-256 hex of the session token; the token itself is never stored. */
+export const sessions = pgTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** tokenHash is null only for revoked tokens imported from another deployment. */
+export const agentIdentities = pgTable("agent_identities", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  memberId: uuid("member_id").notNull(),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").unique(),
+  projectIds: uuid("project_ids").array().notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** codeHash is null only for invites imported from another deployment. */
+export const invites = pgTable("invites", {
+  id: uuid("id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  codeHash: text("code_hash").unique(),
+  roleKeys: text("role_keys").array().notNull().default([]),
+  projectId: uuid("project_id"),
+  createdBy: uuid("created_by").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedBy: uuid("used_by"),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type UserIdentityRow = typeof userIdentities.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
+export type AgentIdentityRow = typeof agentIdentities.$inferSelect;
+export type InviteRow = typeof invites.$inferSelect;
