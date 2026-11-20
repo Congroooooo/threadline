@@ -99,8 +99,9 @@ CREATE TABLE handoffs (
   FOREIGN KEY (workspace_id, to_role_id) REFERENCES roles (workspace_id, id),
   FOREIGN KEY (workspace_id, responded_by) REFERENCES members (workspace_id, id)
 );
+-- Idempotency keys are scoped to the actor that sent them, so two agents can never collide.
 CREATE UNIQUE INDEX handoffs_idempotency_idx
-  ON handoffs (workspace_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+  ON handoffs (workspace_id, from_actor_kind, from_actor_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX handoffs_task_idx ON handoffs (task_id);
 CREATE INDEX handoffs_pending_role_idx ON handoffs (workspace_id, to_role_id) WHERE status = 'pending';
 

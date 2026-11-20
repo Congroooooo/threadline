@@ -45,22 +45,29 @@ export function withSystem<T>(db: Db, fn: (tx: Tx) => Promise<T>): Promise<T> {
 /**
  * Startup and health guard: row-level security only protects anything if the application's
  * database role is not a superuser, has no BYPASSRLS and owns no tables in `public` (owners
- * skip unforced policies, and could drop them). Returns what is wrong, without throwing.
+ * skip unforced policies, and could drop them). Privileges reachable through role membership
+ * count too: the role fails if it is a member of any superuser or BYPASSRLS role, or of any
+ * role that owns a table in `public`. Returns what is wrong, without throwing.
  */
 export async function checkDatabaseRole(db: Db): Promise<{ ok: true } | { ok: false; reason: string }> {
   const result = await db.execute(sql`
-    select r.rolname as role, r.rolsuper as superuser, r.rolbypassrls as bypassrls,
+    select current_user::text as role,
+           (select string_agg(x.rolname, ', ' order by x.rolname) from pg_roles x
+             where x.rolsuper and pg_has_role(current_user, x.oid, 'MEMBER')) as superuser,
+           (select string_agg(x.rolname, ', ' order by x.rolname) from pg_roles x
+             where x.rolbypassrls and pg_has_role(current_user, x.oid, 'MEMBER')) as bypassrls,
            (select count(*)::int from pg_class c
              where c.relnamespace = 'public'::regnamespace
                and c.relkind in ('r', 'p')
-               and c.relowner = r.oid) as owned
-      from pg_roles r
-     where r.rolname = current_user`);
+               and pg_has_role(current_user, c.relowner, 'MEMBER')) as owned`);
   const rows = Array.isArray(result) ? result : ((result as { rows?: unknown[] }).rows ?? []);
-  const row = rows[0] as { role: string; superuser: boolean; bypassrls: boolean; owned: number } | undefined;
+  const row = rows[0] as { role: string; superuser: string | null; bypassrls: string | null; owned: number } | undefined;
   if (!row) return { ok: false, reason: "current database role not found" };
-  if (row.superuser) return { ok: false, reason: `database role ${row.role} is a superuser` };
-  if (row.bypassrls) return { ok: false, reason: `database role ${row.role} has BYPASSRLS` };
-  if (Number(row.owned) > 0) return { ok: false, reason: `database role ${row.role} owns ${row.owned} tables in public` };
+  const via = (roles: string) => (roles.split(", ").includes(row.role) ? "" : ` through membership of ${roles}`);
+  if (row.superuser) return { ok: false, reason: `database role ${row.role} is a superuser${via(row.superuser)}` };
+  if (row.bypassrls) return { ok: false, reason: `database role ${row.role} has BYPASSRLS${via(row.bypassrls)}` };
+  if (Number(row.owned) > 0) {
+    return { ok: false, reason: `database role ${row.role} owns ${row.owned} tables in public (directly or through membership)` };
+  }
   return { ok: true };
 }

@@ -101,11 +101,32 @@ describe("handoffs", () => {
   test("an idempotency key used in another project is not reused or revealed", async () => {
     const othTask = (await t.inWs((tx) => createTask(tx, t.owner, { projectId: t.other, title: "x", ownerRoleId: t.roleIds.backend! }))).taskId;
     const oth = await t.inWs((tx) => createHandoff(tx, t.owner, { ...input, taskId: othTask, idempotencyKey: "shared" }));
-    const err = await t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, idempotencyKey: "shared" })).catch((e) => e);
+    const err = await t.inWs((tx) => createHandoff(tx, t.owner, { ...input, idempotencyKey: "shared" })).catch((e) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect(String(err.message)).not.toContain(oth.handoffId);
     await expect(t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, idempotencyKey: "x".repeat(201) }))).rejects.toThrow(ValidationError);
     await expect(t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, idempotencyKey: "" }))).rejects.toThrow(ValidationError);
+  });
+
+  test("idempotency keys are scoped per sending actor", async () => {
+    const a = await t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, idempotencyKey: "retry-1" }));
+    const b = await t.inWs((tx) => createHandoff(tx, t.frontendAgent, { ...input, idempotencyKey: "retry-1" }));
+    expect(a.created).toBe(true);
+    expect(b.created).toBe(true);
+    expect(b.handoffId).not.toBe(a.handoffId);
+    // each agent's retry still finds its own handoff
+    expect((await t.inWs((tx) => createHandoff(tx, t.frontendAgent, { ...input, idempotencyKey: "retry-1" }))).handoffId)
+      .toBe(b.handoffId);
+  });
+
+  test("a retry after the target role is archived returns the existing handoff", async () => {
+    const qa = await t.inWs((tx) => upsertRole(tx, t.owner, { key: "qa", name: "QA", permissions: ["project.read"] }));
+    const a = await t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, toRoleId: qa, idempotencyKey: "q1" }));
+    await t.inWs((tx) => archiveRole(tx, t.owner, qa));
+    expect(await t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, toRoleId: qa, idempotencyKey: "q1" })))
+      .toEqual({ handoffId: a.handoffId, unassigned: true, created: false });
+    // without the key the archived role is still refused
+    await expect(t.inWs((tx) => createHandoff(tx, t.backendAgent, { ...input, toRoleId: qa }))).rejects.toThrow(ValidationError);
   });
 
   test("a handoff to a role nobody holds is created and flagged unassigned", async () => {

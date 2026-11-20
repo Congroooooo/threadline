@@ -230,7 +230,7 @@ export const evidence = pgTable("evidence", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Unique on (workspace_id, idempotency_key) where the key is set. */
+/** Unique on (workspace_id, from_actor_kind, from_actor_id, idempotency_key) where the key is set. */
 export const handoffs = pgTable("handoffs", {
   id: uuid("id").primaryKey(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),

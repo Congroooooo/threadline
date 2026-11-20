@@ -67,18 +67,19 @@ export async function createHandoff(
 ): Promise<{ handoffId: string; unassigned: boolean; created: boolean }> {
   const task = await loadTask(tx, input.taskId);
   await requirePermission(tx, actor, "handoff.create", task.projectId);
-  const delivered = label(input.delivered, "delivered");
-  const requiredAction = label(input.requiredAction, "requiredAction");
-  const knownLimits = optionalText(input.knownLimits, "knownLimits");
   const idempotencyKey = parseIdempotencyKey(input.idempotencyKey);
-  await requireActiveRole(tx, input.toRoleId, "toRoleId");
-  const items = parseEvidence(input.evidence, actor);
 
+  // Keys are scoped to the sending actor. A retry is answered before the rest of the input
+  // is validated, so it still succeeds after e.g. the target role was archived.
   const existing = async (key: string) => {
     const [row] = await tx
       .select({ id: handoffs.id, projectId: handoffs.projectId, toRoleId: handoffs.toRoleId })
       .from(handoffs)
-      .where(eq(handoffs.idempotencyKey, key));
+      .where(and(
+        eq(handoffs.fromActorKind, actor.kind),
+        eq(handoffs.fromActorId, actorId(actor)),
+        eq(handoffs.idempotencyKey, key),
+      ));
     if (!row) return null;
     if (row.projectId !== task.projectId) throw new ValidationError("idempotencyKey is already in use");
     return { handoffId: row.id, unassigned: await isUnassigned(tx, row.toRoleId, row.projectId), created: false };
@@ -87,6 +88,12 @@ export async function createHandoff(
     const found = await existing(idempotencyKey);
     if (found) return found;
   }
+
+  const delivered = label(input.delivered, "delivered");
+  const requiredAction = label(input.requiredAction, "requiredAction");
+  const knownLimits = optionalText(input.knownLimits, "knownLimits");
+  await requireActiveRole(tx, input.toRoleId, "toRoleId");
+  const items = parseEvidence(input.evidence, actor);
 
   const handoffId = newId();
   const inserted = await tx
