@@ -25,4 +25,8 @@ regexes = [
   '''fakeaccess04''',
   '''fakerefresh05''',
   '''MIIfakefakefake''',
+  '''fakeaccess06''',
+  '''fakeapikey07''',
+  '''sk\-fakefakefakefakefake8901''',
+  '''fakeghs0123456789''',
 ]

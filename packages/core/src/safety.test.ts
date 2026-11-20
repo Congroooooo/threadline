@@ -33,6 +33,38 @@ test("redacts fine-grained GitHub PATs and sk- API keys", () => {
     "c sk-proj-fakefakefakefakefake4567 d");
   expect(out).toBe("a [REDACTED] b [REDACTED] c [REDACTED] d");
 });
+test("sk- names that are words, not keys, are kept", () => {
+  expect(redactSecrets("try sk-learn-compatible-models-v2 here")).toBe("try sk-learn-compatible-models-v2 here");
+  expect(redactSecrets("sk-abcdefghijklmnopqrstuvwxyz")).toBe("sk-abcdefghijklmnopqrstuvwxyz"); // no digit
+  expect(redactSecrets("k=sk-fakefakefakefakefake8901")).toBe("k=[REDACTED]");
+});
+test("a token used as the URL password is redacted up to the @", () => {
+  expect(redactSecrets("git clone https://x-access-token:fakeghs0123456789@github.com/o/r.git"))
+    .toBe("git clone https://x-access-token:[REDACTED]@github.com/o/r.git");
+  expect(redactSecrets("x-access-token:fakeghs0123456789@github.com")).toBe("x-access-token:[REDACTED]@github.com");
+});
+test("redaction runs in linear time on hostile input", () => {
+  const inputs = {
+    "token- x1666": "token-".repeat(1666),
+    "a- x5000": "a-".repeat(5000),
+    "password= x1111": "password=".repeat(1111),
+    "https://a: x1000": "https://a:".repeat(1000),
+    "Bearer x1428": "Bearer ".repeat(1428),
+    "eyJ x3333": "eyJ".repeat(3333),
+    "sk-sk- x3333": "sk-".repeat(3333),
+    "a. x5000": "a.".repeat(5000),
+    "key + spaces": "token" + " ".repeat(9990),
+    "pem no end": "-----BEGIN PRIVATE KEY-----" + "A ".repeat(4980),
+  };
+  redactSecrets("warm up token=abcdefgh1");
+  for (const [name, input] of Object.entries(inputs)) {
+    expect(input.length).toBeLessThanOrEqual(10_000);
+    const start = performance.now();
+    redactSecrets(input);
+    const ms = performance.now() - start;
+    expect(ms, `${name}: ${ms.toFixed(1)} ms`).toBeLessThan(50);
+  }
+});
 test("redacts JSON-quoted secret keys", () => {
   expect(redactSecrets(`{"password": "FakePassw0rd3", "user": "sam"}`))
     .toBe(`{"password": "[REDACTED]", "user": "sam"}`);
@@ -63,6 +95,12 @@ test("keeps short non-secret values next to secret-ish words", () => {
   expect(redactSecrets("token: expired")).toBe("token: expired");
   expect(redactSecrets("secret: no, tokens: 5")).toBe("secret: no, tokens: 5");
   expect(redactSecrets("password reset link sent")).toBe("password reset link sent");
+  // plural or descriptive words that merely contain a secret word are prose
+  for (const prose of ["Passwords: must be rotated", "tokens: refreshed", "Tokenizer: sentencepiece", "token_count: 12345678"]) {
+    expect(redactSecrets(prose)).toBe(prose);
+  }
+  // camelCase and dashed secret names still count
+  expect(redactSecrets("accessToken=fakeaccess06 api-key: fakeapikey07")).toBe("accessToken=[REDACTED] api-key: [REDACTED]");
   // a URL query parameter is always treated as a secret
   expect(redactSecrets("https://ci.example.com/r/9?token=short&page=2")).toBe("https://ci.example.com/r/9?token=[REDACTED]&page=2");
 });

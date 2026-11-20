@@ -130,7 +130,7 @@ describe("notifiers", () => {
 
   test("names lose Markdown link and emphasis characters", () => {
     const m = handoffMessage({ ref: "ACME-1", fromName: "[click](https://evil.example) *b* _i_ ~s~ `c`", toRoleName: "Q_A", unassigned: false });
-    expect(m).toBe("Handoff on ACME-1 from clickhttps://evil.example b i s c to QA.");
+    expect(m).toBe("Handoff on ACME-1 from clickhttps://evil.example b _i_ s c to Q_A.");
     expect(handoffMessage({ ref: "ACME-1", fromName: "Bo", fromAgent: true, toRoleName: "QA", unassigned: false }))
       .toBe("Handoff on ACME-1 from Bo (agent) to QA.");
   });

@@ -4,42 +4,78 @@ export const MAX_TEXT = 10_000;
 
 const REDACTED = "[REDACTED]";
 
+// Every pattern here must run in linear time on hostile input (cleanText runs on all free
+// text). Rules kept throughout: a pattern may only start at the beginning of a run of its
+// own characters (a negative lookbehind), so two starts never rescan the same run, and no
+// two adjacent quantifiers can match the same characters. safety.test.ts times this.
+
 const TOKEN_PATTERNS: RegExp[] = [
   // PEM private keys, including a block cut off before its END line (redact to end of text).
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g,
+  /-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,40}PRIVATE KEY-----|$(?![\s\S]))/g,
   /glpat-[A-Za-z0-9_-]{20,}/g,
   /github_pat_[A-Za-z0-9_]{20,}/g,
   /gh[pousr]_[A-Za-z0-9]{20,}/g,
   /AKIA[A-Z0-9]{16}/g,
-  /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
   /xox[baprs]-[A-Za-z0-9-]+/g,
-  // Anthropic (sk-ant-...) and OpenAI-style (sk-..., sk-proj-...) API keys.
-  /\bsk-[A-Za-z0-9_-]{20,}/g,
   /https?:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_/-]+/gi,
 ];
 
+/**
+ * Anthropic (sk-ant-api03-...) and OpenAI-style (sk-..., sk-proj-...) API keys. The callback
+ * keeps word-like names such as sk-learn-compatible-models-v2: a key has a digit and either a
+ * long dash-free stretch (16+) or a long body (40+).
+ */
+const SK_KEY = /(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}/g;
+
+function redactSkKey(match: string): string {
+  const body = match.slice(3);
+  if (!/\d/.test(body)) return match;
+  const longest = Math.max(...body.split("-").map((s) => s.length));
+  return longest >= 16 || body.length >= 40 ? REDACTED : match;
+}
+
 /** scheme://user:password@host — keep everything but the password. */
-const URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:)([^\s@/]+)@/gi;
+const URL_CREDENTIALS = /(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:)([^\s@/]+)@/gi;
 
 /** `Authorization: Bearer <opaque>` — any token shape, as long as it looks like one (8+ chars, has a digit). */
 const BEARER = /\b(Bearer\s+)(?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{8,}=*/gi;
 
 /**
- * key=value, key: value, "key": "value" and 'key': 'value' where the key name contains a
- * secret-ish word (client_secret, private_key, access_token, DB_PASSWORD, ...). Password keys
- * and URL query parameters (?token=...) redact any value; other keys only redact a value that
- * looks like a secret (8+ chars, no spaces), so prose such as "token: expired" is left alone.
+ * key=value, key: value, "key": "value" and 'key': 'value'. The identifier is matched once
+ * (from the start of its run, at most 64 characters) and redactKeyValue decides whether it
+ * names a secret. The value stops at whitespace, quotes, & @ / , ; }.
  */
-const SECRET_KEY = String.raw`[A-Za-z0-9_-]*?(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)[A-Za-z0-9_-]*`;
-const KEY_VALUE = new RegExp(String.raw`(["']?)\b(${SECRET_KEY})\1(\s*[=:]\s*)(["']?)([^\s"',;}&]+)`, "gi");
+const KEY_VALUE = /(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{1,64})(["']?)(\s*[=:]\s*)(["']?)([^\s"'&@/,;}]+)/g;
+
+/** Last part of a key name that makes it a secret (DB_PASSWORD, client_secret, GITHUB_TOKEN). */
+const SECRET_LAST = new Set(["password", "passwd", "secret", "token", "apikey"]);
+/** Last two parts that make it a secret (API_KEY, private_key, secret_key). */
+const SECRET_LAST_TWO = new Set(["api_key", "private_key", "secret_key", "access_key"]);
+
+/**
+ * Whether a key names a secret: its last part (split on _, - and camelCase) is one of the
+ * secret words. Words that merely contain one (tokens, Passwords, Tokenizer, token_count) are
+ * prose. Returns "password" for password keys, which redact any value.
+ */
+function secretKind(key: string): "password" | "secret" | null {
+  const parts = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[_-]+/).filter((p) => p !== "");
+  const last = parts[parts.length - 1] ?? "";
+  if (last === "password" || last === "passwd") return "password";
+  if (SECRET_LAST.has(last) || SECRET_LAST_TWO.has(parts.slice(-2).join("_"))) return "secret";
+  return null;
+}
 
 function redactKeyValue(
-  match: string, q1: string, key: string, sep: string, q2: string, value: string, offset: number, whole: string,
+  match: string, key: string, q1: string, sep: string, q2: string, value: string, offset: number, whole: string,
 ): string {
-  const isPassword = /pass(?:word|wd)/i.test(key);
+  const kind = secretKind(key);
+  if (kind === null) return match;
+  // Password keys and URL query parameters (?token=...) redact any value; other keys only a
+  // value that looks like a secret (8+ chars), so prose such as "token: expired" is kept.
   const isQueryParam = q1 === "" && (whole[offset - 1] === "?" || whole[offset - 1] === "&");
-  if (!isPassword && !isQueryParam && value.length < 8) return match;
-  return `${q1}${key}${q1}${sep}${q2}${REDACTED}`;
+  if (kind !== "password" && !isQueryParam && value.length < 8) return match;
+  return `${key}${q1}${sep}${q2}${REDACTED}`;
 }
 
 export function capText(text: string, field: string): string {
@@ -52,6 +88,7 @@ export function capText(text: string, field: string): string {
 export function redactSecrets(text: string): string {
   let out = text;
   for (const pattern of TOKEN_PATTERNS) out = out.replace(pattern, REDACTED);
+  out = out.replace(SK_KEY, redactSkKey);
   out = out.replace(URL_CREDENTIALS, `$1${REDACTED}@`);
   out = out.replace(BEARER, `$1${REDACTED}`);
   return out.replace(KEY_VALUE, redactKeyValue);

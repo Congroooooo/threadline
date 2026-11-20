@@ -73,10 +73,11 @@ export async function notifyProject(
 function safeName(s: string): string {
   // Control and format characters (bidi, zero-width) become spaces; @ < > are dropped so a
   // name cannot trigger a chat mention or markup, and Markdown link and emphasis characters
-  // ([ ] ( ) * _ ~ `) are dropped so it cannot render as a link or formatting.
+  // ([ ] ( ) * ~ `) are dropped so it cannot render as a link or formatting. _ is kept: it is
+  // common in role keys.
   const t = s
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
-    .replace(/[@<>[\]()*_~`]/g, "")
+    .replace(/[@<>[\]()*~`]/g, "")
     .replace(/\s+/g, " ")
     .trim();
   const chars = Array.from(t);
