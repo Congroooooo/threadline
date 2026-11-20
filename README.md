@@ -25,7 +25,7 @@ There are two ways to run Threadline. Both run the same code.
 
 The Worker serves the API and the built web app as static assets; Neon provides Postgres.
 
-1. **Neon.** Create a project with a database named `threadline`, in the region closest to your team: almost every request is a few database round trips, and the Worker uses Smart Placement to run next to the database. The connection string Neon shows you uses the owner role: that one is your `MIGRATION_DATABASE_URL`.
+1. **Neon.** Create a project in the region closest to your team (any database name works; Neon's default is `neondb`). Almost every request is several database round trips, so the Worker is pinned to the database's cloud region: set `placement.region` in `apps/api/wrangler.jsonc` to match it (for example `aws:ap-southeast-1` for Singapore). Without this, a request served far from the database can take several seconds. The connection string Neon shows you uses the owner role: that one is your `MIGRATION_DATABASE_URL`.
 2. **The `app_user` role.** In the Neon console's SQL Editor, as the owner, run:
 
    ```sql

@@ -11,9 +11,10 @@
   // No compatibility flags: no dependency needs nodejs_compat (Hono, arctic and the Neon
   // driver all run on plain Workers APIs; pg is only used by src/node.ts).
   "observability": { "enabled": true },
-  // Smart Placement runs the Worker near the database (Neon) instead of near each user, so
-  // the several queries of one request (e.g. the session-start hook) each make a short trip.
-  "placement": { "mode": "smart" },
+  // Run the Worker in the same cloud region as the database (Neon, AWS ap-southeast-1), not
+  // near each user, so the several queries of one request (e.g. the session-start hook) each
+  // make a short trip. Change this when the Neon project lives in another region.
+  "placement": { "region": "aws:ap-southeast-1" },
   "assets": {
     // Built by `pnpm --filter @threadline/web build` (part of `pnpm run deploy`).
     "directory": "../web/dist",
