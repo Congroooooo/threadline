@@ -45,3 +45,13 @@ export {
   type Provider,
 } from "./auth.js";
 export { DEFAULT_INVITE_DAYS, MAX_INVITE_DAYS, createInvite, acceptInvite, revokeInvite } from "./invites.js";
+export {
+  PROJECT_KEY,
+  MAX_REPO_URLS,
+  createProject,
+  updateProjectConfig,
+  findProjectByRepoUrl,
+  getProject,
+  normalizeRepoUrl,
+  type NotifierConfig,
+} from "./projects.js";

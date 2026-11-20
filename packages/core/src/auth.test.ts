@@ -14,6 +14,7 @@ import { agentIdentities } from "./db/schema.js";
 import { createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
+import { createProject } from "./projects.js";
 import { hashSecret } from "./tokens.js";
 import { addMember, createWorkspace, removeMember, setMemberRoles } from "./tenancy.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
@@ -23,14 +24,16 @@ let userId: string;
 let workspaceId: string;
 let memberId: string;
 let member: Actor;
-const projectId = newId();
-const otherProject = newId();
+let projectId: string;
+let otherProject: string;
 
 beforeEach(async () => {
   db = await createTestDb();
   userId = await seedUser(db, "Dana");
   ({ workspaceId, memberId } = await createWorkspace(db, { name: "Studio", userId, displayName: "Dana" }));
   member = { kind: "member", workspaceId, memberId };
+  projectId = await inWs((tx) => createProject(tx, member, { key: "APP", name: "App" }));
+  otherProject = await inWs((tx) => createProject(tx, member, { key: "WEB", name: "Web" }));
 });
 
 const inWs = <T>(fn: Parameters<typeof withWorkspace<T>>[2]) => withWorkspace(db, workspaceId, fn);
@@ -159,6 +162,19 @@ describe("agent tokens", () => {
     await expect(
       inWs((tx) => createAgentToken(tx, roleless, { name: "laptop", projectIds: [projectId] })),
     ).rejects.toThrow(ForbiddenError);
+  });
+
+  test("a token can only name existing, active projects of the workspace", async () => {
+    await expect(inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [newId()] }))).rejects.toThrow(NotFoundError);
+    await expect(inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [projectId, newId()] }))).rejects.toThrow(NotFoundError);
+    await rawQuery(db, `update projects set archived_at = now() where id = '${otherProject}'`);
+    await expect(inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [otherProject] }))).rejects.toThrow(NotFoundError);
+    const owner2 = await seedUser(db, "Eve");
+    const ws2 = await createWorkspace(db, { name: "Other", userId: owner2, displayName: "Eve" });
+    const admin2: Actor = { kind: "member", workspaceId: ws2.workspaceId, memberId: ws2.memberId };
+    const foreign = await withWorkspace(db, ws2.workspaceId, (tx) => createProject(tx, admin2, { key: "APP", name: "Theirs" }));
+    await expect(inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [foreign] }))).rejects.toThrow(NotFoundError);
+    expect(await rawQuery(db, "select count(*)::int as n from agent_identities")).toEqual([{ n: 0 }]);
   });
 
   test("token input is validated", async () => {

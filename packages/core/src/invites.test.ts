@@ -7,6 +7,7 @@ import { createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
 import { acceptInvite, createInvite, revokeInvite } from "./invites.js";
+import { createProject } from "./projects.js";
 import { hashSecret } from "./tokens.js";
 import { addMember, archiveRole, createWorkspace, listMembers, listRoles, removeMember } from "./tenancy.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
@@ -16,7 +17,7 @@ let workspaceId: string;
 let admin: Actor;
 let newUser: string;
 let otherUser: string;
-const projectId = newId();
+let projectId: string;
 
 beforeEach(async () => {
   db = await createTestDb();
@@ -26,6 +27,7 @@ beforeEach(async () => {
   admin = { kind: "member", workspaceId, memberId: ws.memberId };
   newUser = await seedUser(db, "Sam");
   otherUser = await seedUser(db, "Other");
+  projectId = await withWorkspace(db, workspaceId, (tx) => createProject(tx, admin, { key: "APP", name: "App" }));
 });
 
 const inWs = <T>(fn: Parameters<typeof withWorkspace<T>>[2]) => withWorkspace(db, workspaceId, fn);
@@ -50,6 +52,13 @@ describe("invites", () => {
     const { memberId } = await acceptInvite(db, { userId: newUser, displayName: "Sam", code });
     expect((await inWs((tx) => listMembers(tx))).find((m) => m.memberId === memberId)?.roles)
       .toEqual([{ key: "backend", projectId }]);
+  });
+
+  test("a project invite needs an existing, active project in the workspace", async () => {
+    await expect(inWs((tx) => createInvite(tx, admin, { roleKeys: ["backend"], projectId: newId() }))).rejects.toThrow(NotFoundError);
+    await rawQuery(db, `update projects set archived_at = now() where id = '${projectId}'`);
+    await expect(inWs((tx) => createInvite(tx, admin, { roleKeys: ["backend"], projectId }))).rejects.toThrow(NotFoundError);
+    expect(await rawQuery(db, "select count(*)::int as n from invites")).toEqual([{ n: 0 }]);
   });
 
   test("codes are stored only as hashes", async () => {

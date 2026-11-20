@@ -5,6 +5,7 @@ import { type Db, type Tx, withSystem } from "./db/client.js";
 import { invites, memberRoles, members, users } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
+import { requireActiveProjects } from "./projects.js";
 import { activeRoleIds, assign, label, requirePermission, revokeMemberAgentTokens } from "./tenancy.js";
 import { hashSecret, INVITE_CODE_BYTES, INVITE_CODE_PREFIX, randomSecret, secretPattern, UUID } from "./tokens.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
@@ -37,6 +38,7 @@ export async function createInvite(
     throw new ValidationError(`expiresInDays must be a whole number from 1 to ${MAX_INVITE_DAYS}`);
   }
   if (input.projectId !== undefined && !UUID.test(input.projectId)) throw new ValidationError("projectId must be a UUID");
+  if (input.projectId !== undefined) await requireActiveProjects(tx, [input.projectId]);
   const roleKeys = (await activeRoleIds(tx, input.roleKeys)).map((r) => r.key).sort();
   const projectId = input.projectId ?? null;
   const inviteId = newId();

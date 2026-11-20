@@ -133,3 +133,29 @@ export type UserIdentityRow = typeof userIdentities.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type AgentIdentityRow = typeof agentIdentities.$inferSelect;
 export type InviteRow = typeof invites.$inferSelect;
+
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").primaryKey(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique().on(t.workspaceId, t.id), unique().on(t.workspaceId, t.key)],
+);
+
+/** notifier holds a webhook URL (a secret); approval and tracker are validated from Phase 3. */
+export const projectConfig = pgTable("project_config", {
+  projectId: uuid("project_id").primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
+  repoUrls: text("repo_urls").array().notNull().default([]),
+  notifier: jsonb("notifier").$type<{ kind: "mattermost" | "slack"; webhookUrl: string }>(),
+  approval: jsonb("approval").$type<Record<string, unknown>>().notNull(),
+  tracker: jsonb("tracker").$type<Record<string, unknown>>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ProjectRow = typeof projects.$inferSelect;

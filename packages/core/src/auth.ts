@@ -3,6 +3,7 @@ import { type Db, type Tx, withSystem } from "./db/client.js";
 import { agentIdentities, members, sessions, userIdentities, users, workspaces } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
+import { requireActiveProjects } from "./projects.js";
 import { capText, cleanText } from "./safety.js";
 import { isForeignKeyViolation, label, requirePermission } from "./tenancy.js";
 import {
@@ -144,6 +145,7 @@ export async function createAgentToken(
   if (projectIds.length === 0) throw new ValidationError("projectIds must not be empty");
   if (!projectIds.every((p) => UUID.test(p))) throw new ValidationError("projectIds must be UUIDs");
   for (const projectId of projectIds) await requirePermission(tx, actor, "project.read", projectId);
+  await requireActiveProjects(tx, projectIds);
 
   const agentId = newId();
   const token = randomSecret(AGENT_TOKEN_PREFIX, AGENT_TOKEN_BYTES);
