@@ -138,7 +138,7 @@ describe("projects", () => {
     const id = await inWs((tx) => createProject(tx, admin, { key: "APP", name: "App" }));
     const set = (webhookUrl: string, kind: any = "slack") => inWs((tx) => updateProjectConfig(tx, admin, id, { notifier: { kind, webhookUrl } }));
     for (const bad of ["", "not a url", "/hooks/x", "http://chat.example.com/h", "ftp://chat.example.com/h", "javascript:alert(1)",
-      "http://evil.com\@localhost/x", "http://localhost.evil.com/x", "http://localhost@evil.com/x", "https://user:pw@example.com/x", "https://user@example.com/x"]) {
+      "http://evil.com\\@localhost/x", "http://evil.com@localhost/x", "https://chat.example.com\\hooks\\x", "http://localhost.evil.com/x", "http://localhost@evil.com/x", "https://user:pw@example.com/x", "https://user@example.com/x"]) {
       await expect(set(bad), bad).rejects.toThrow(ValidationError);
     }
     await expect(set(hook, "teams")).rejects.toThrow(ValidationError);
