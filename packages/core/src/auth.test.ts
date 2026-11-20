@@ -195,6 +195,21 @@ describe("agent tokens", () => {
     expect(await resolveAgentToken(db, token)).toBeNull();
   });
 
+  test("removing a member revokes their tokens, which stay dead when the member is re-added", async () => {
+    const sam = await teammate("Sam", ["frontend"]);
+    const { agentId, token } = await inWs((tx) => createAgentToken(tx, sam, { name: "laptop", projectIds: [projectId] }));
+    await inWs((tx) => removeMember(tx, member, sam.memberId));
+    const [row] = await rawQuery(db, `select revoked_at from agent_identities where id = '${agentId}'`);
+    expect(row.revoked_at).not.toBeNull();
+    const events = (await inWs((tx) => listEvents(tx, {}))).filter((e) => e.type === "agent_token.revoked");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorId: memberId, subjectId: agentId, data: { reason: "member_removed" } });
+    const samUser = (await rawQuery(db, `select user_id from members where id = '${sam.memberId}'`))[0].user_id;
+    const again = await inWs((tx) => addMember(tx, member, { userId: samUser, displayName: "Sam", roleKeys: ["frontend"] }));
+    expect(again).toBe(sam.memberId);
+    expect(await resolveAgentToken(db, token)).toBeNull();
+  });
+
   test("agent identities are hidden from other workspaces and cannot be inserted under withSystem", async () => {
     await inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [projectId] }));
     const other = await createWorkspace(db, { name: "Agency", userId, displayName: "Dana" });

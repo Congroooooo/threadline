@@ -97,12 +97,12 @@ describe("invites", () => {
     expect(await acceptInvite(db, { userId: newUser, displayName: "Sam", code })).toEqual({ workspaceId, memberId: sam });
     const m = (await inWs((tx) => listMembers(tx))).find((x) => x.memberId === sam)!;
     expect(m).toMatchObject({ status: "active", roles: [{ key: "frontend", projectId: null }] });
-    // A token from before the removal stays dead, and its revocation is recorded.
+    // A token from before the removal stays dead (revoked once, on removal).
     expect(await resolveAgentToken(db, token)).toBeNull();
     expect(await rawQuery(db, "select count(*)::int as n from agent_identities where revoked_at is null")).toEqual([{ n: 0 }]);
     const revokedEvents = (await inWs((tx) => listEvents(tx, {}))).filter((e) => e.type === "agent_token.revoked");
     expect(revokedEvents).toHaveLength(1);
-    expect(revokedEvents[0]).toMatchObject({ actorId: sam, subjectKind: "agent", data: { reason: "member_reactivated" } });
+    expect(revokedEvents[0]).toMatchObject({ actorId: admin.kind === "member" ? admin.memberId : "", subjectKind: "agent", data: { reason: "member_removed" } });
     // New tokens work as usual.
     const fresh = await inWs((tx) => createAgentToken(tx, { kind: "member", workspaceId, memberId: sam }, { name: "laptop", projectIds: [projectId] }));
     expect(await resolveAgentToken(db, fresh.token)).not.toBeNull();

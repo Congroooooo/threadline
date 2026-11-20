@@ -2,10 +2,10 @@
 // in and accepts it, and becomes a member with the invite's roles.
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { type Db, type Tx, withSystem } from "./db/client.js";
-import { agentIdentities, invites, memberRoles, members, users } from "./db/schema.js";
+import { invites, memberRoles, members, users } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
-import { activeRoleIds, assign, label, requirePermission } from "./tenancy.js";
+import { activeRoleIds, assign, label, requirePermission, revokeMemberAgentTokens } from "./tenancy.js";
 import { hashSecret, INVITE_CODE_BYTES, INVITE_CODE_PREFIX, randomSecret, secretPattern, UUID } from "./tokens.js";
 import { type Actor, ForbiddenError, NotFoundError, ValidationError } from "./types.js";
 
@@ -120,21 +120,9 @@ export async function acceptInvite(
         .update(memberRoles)
         .set({ revokedAt: sql`now()` })
         .where(and(eq(memberRoles.memberId, memberId), isNull(memberRoles.revokedAt)));
-      // Tokens made before the removal stay dead: one leaked back then must not revive.
-      const revoked = await tx
-        .update(agentIdentities)
-        .set({ revokedAt: sql`now()` })
-        .where(and(eq(agentIdentities.memberId, memberId), isNull(agentIdentities.revokedAt)))
-        .returning({ id: agentIdentities.id });
-      for (const { id } of revoked) {
-        await recordEvent(tx, {
-          actor,
-          type: "agent_token.revoked",
-          subjectKind: "agent",
-          subjectId: id,
-          data: { reason: "member_reactivated" },
-        });
-      }
+      // removeMember already revoked their tokens; this guards rows from other paths
+      // (an import, say) so a token from before the removal can never revive.
+      await revokeMemberAgentTokens(tx, actor, memberId, "member_reactivated");
     } else {
       await tx.insert(members).values({ id: memberId, workspaceId, userId: input.userId, displayName });
     }

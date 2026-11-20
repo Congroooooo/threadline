@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { type Db, type Tx, withSystem } from "./db/client.js";
-import { memberRoles, members, roles, users, workspaces } from "./db/schema.js";
+import { agentIdentities, memberRoles, members, roles, users, workspaces } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
 import { cleanText } from "./safety.js";
@@ -296,7 +296,28 @@ export async function setMemberRoles(
   });
 }
 
-/** Marks the member removed. Their agent tokens stop resolving (see resolveAgentToken). */
+/**
+ * Revokes every open agent token of `memberId`, recording agent_token.revoked for each.
+ * Used on removal (so a token leaked before then stays dead if the member comes back)
+ * and again on reactivation through an invite, as a second line of defence.
+ */
+export async function revokeMemberAgentTokens(
+  tx: Tx,
+  actor: Actor,
+  memberId: string,
+  reason: "member_removed" | "member_reactivated",
+): Promise<void> {
+  const revoked = await tx
+    .update(agentIdentities)
+    .set({ revokedAt: sql`now()` })
+    .where(and(eq(agentIdentities.memberId, memberId), isNull(agentIdentities.revokedAt)))
+    .returning({ id: agentIdentities.id });
+  for (const { id } of revoked) {
+    await recordEvent(tx, { actor, type: "agent_token.revoked", subjectKind: "agent", subjectId: id, data: { reason } });
+  }
+}
+
+/** Marks the member removed and revokes their agent tokens, which never come back. */
 export async function removeMember(tx: Tx, actor: Actor, memberId: string): Promise<void> {
   await requirePermission(tx, actor, "workspace.admin");
   const [m] = await tx.select({ status: members.status }).from(members).where(eq(members.id, memberId));
@@ -305,6 +326,7 @@ export async function removeMember(tx: Tx, actor: Actor, memberId: string): Prom
   await keepingAnAdmin(tx, async (sp) => {
     await sp.update(members).set({ status: "removed" }).where(eq(members.id, memberId));
     await recordEvent(sp, { actor, type: "member.removed", subjectKind: "member", subjectId: memberId });
+    await revokeMemberAgentTokens(sp, actor, memberId, "member_removed");
   });
 }
 
