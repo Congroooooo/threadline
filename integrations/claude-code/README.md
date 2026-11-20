@@ -36,17 +36,15 @@ Copy `integrations/claude-code/session-start.mjs` to your project's `.claude/hoo
     "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/threadline-session-start.mjs\"" } ] } ] } }
 ```
 
-`$CLAUDE_PROJECT_DIR` is expanded by Claude Code to the project root.
-
-(Unverified: this `$CLAUDE_PROJECT_DIR` form was written without checking the current Claude Code hooks documentation. Check it there if the hook does not run.)
+`$CLAUDE_PROJECT_DIR` is the environment variable Claude Code documents for hook commands: it holds the project root.
 
 Inside a checkout of Threadline itself the script can instead be referenced by its repo-relative path: `"command": "node integrations/claude-code/session-start.mjs"`.
 
 ### What the hook does
 
-It runs `git remote get-url origin` and `git branch --show-current`, then requests `GET /api/agent/session-context` with your token, and prints the response exactly as received. Claude Code adds a SessionStart hook's output to the session.
+It runs `git remote get-url origin` and `git branch --show-current`, removes any credentials from the remote URL (`https://user:token@host/...` is sent as `https://host/...`), then requests `GET /api/agent/session-context` with your token, and prints the response exactly as received. Claude Code adds a SessionStart hook's output to the session.
 
-It stays quiet and never fails the session. It prints nothing, and exits 0, when `THREADLINE_URL` or `THREADLINE_TOKEN` is unset, the URL is not http(s), the folder is not a git repository with an `origin`, the server is unreachable, answers with an error, or takes longer than 3 seconds, or when the repository does not belong to one of the token's projects. It never prints the token.
+It stays quiet and never fails the session. It prints nothing, and exits 0, when `THREADLINE_URL` or `THREADLINE_TOKEN` is unset, the URL is not http(s), the folder is not a git repository with an `origin`, the server is unreachable, answers with an error, or takes longer than 10 seconds, or when the repository does not belong to one of the token's projects. It never prints the token.
 
 ## Other MCP-capable agents
 

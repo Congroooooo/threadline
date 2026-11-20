@@ -4,7 +4,9 @@
 // path prints nothing and exits 0, and nothing here ever prints the token.
 import { execFile } from "node:child_process";
 
-const TIMEOUT_MS = 3000;
+// Generous: a cold Worker plus a few database round trips can take a few seconds. Git calls
+// keep their own short timeout.
+const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 64 * 1024; // a huge response must not flood the session
 
 function git(args) {
@@ -13,6 +15,15 @@ function git(args) {
       resolve(err ? "" : String(stdout).trim());
     });
   });
+}
+
+/**
+ * The remote URL without its userinfo: https://user:TOKEN@host/path becomes https://host/path,
+ * so credentials stored in a remote never leave the machine. scp-like remotes (git@host:path)
+ * carry no secret and are left alone. The server ignores userinfo when matching repositories.
+ */
+function stripCredentials(remote) {
+  return remote.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, "$1");
 }
 
 async function main() {
@@ -27,7 +38,7 @@ async function main() {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return;
 
-  const repo = await git(["remote", "get-url", "origin"]);
+  const repo = stripCredentials(await git(["remote", "get-url", "origin"]));
   if (!repo) return;
   const branch = await git(["branch", "--show-current"]);
   url.searchParams.set("repo", repo);

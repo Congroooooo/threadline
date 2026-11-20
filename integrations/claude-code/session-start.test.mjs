@@ -76,6 +76,23 @@ test("prints the server's text when the request succeeds", async () => {
   assert.equal(srv.requests[0].auth, `Bearer ${TOKEN}`);
 });
 
+test("strips credentials from the remote URL before sending it", async () => {
+  const srv = await serve((_req, res) => res.end("ok"));
+  const cases = [
+    ["https://user:ghp_fakeRemoteToken123@git.example/acme/app.git", "https://git.example/acme/app.git"],
+    ["https://oauth2:glpat-fakeRemoteToken@git.example:8443/acme/app.git", "https://git.example:8443/acme/app.git"],
+    ["ssh://git@git.example/acme/app.git", "ssh://git.example/acme/app.git"],
+    ["git@git.example:acme/app.git", "git@git.example:acme/app.git"],
+  ];
+  for (const [remote, sent] of cases) {
+    const repo = gitRepo(remote, "main");
+    const r = await run(repo, { THREADLINE_URL: srv.url, THREADLINE_TOKEN: TOKEN });
+    assert.equal(r.code, 0);
+    assert.equal(new URL(srv.requests.at(-1).url, "http://x").searchParams.get("repo"), sent);
+    assert.ok(!srv.requests.at(-1).url.includes("fakeRemoteToken"));
+  }
+});
+
 test("prints nothing when the body is empty", async () => {
   const srv = await serve((_req, res) => res.writeHead(200).end(""));
   const repo = gitRepo("https://git.example/a/b.git", "main");
@@ -134,13 +151,16 @@ test("omits branch when HEAD is detached", async () => {
   assert.equal(new URL(srv.requests[0].url, "http://x").searchParams.has("branch"), false);
 });
 
-test("gives up after 3 seconds", async () => {
-  const srv = await serve(() => {});
+test("waits for a slow server, then gives up after 10 seconds", async () => {
+  const slow = await serve((_req, res) => setTimeout(() => res.end("late but fine"), 4000));
   const repo = gitRepo("https://git.example/a/b.git", "main");
+  const ok = await run(repo, { THREADLINE_URL: slow.url, THREADLINE_TOKEN: TOKEN });
+  assert.equal(ok.stdout, "late but fine");
+  const srv = await serve(() => {});
   const r = await run(repo, { THREADLINE_URL: srv.url, THREADLINE_TOKEN: TOKEN });
   assert.deepEqual([r.code, r.stdout, r.stderr], [0, "", ""]);
-  assert.ok(r.ms >= 2900, `returned too early: ${r.ms}ms`);
-  assert.ok(r.ms < 6000, `took too long: ${r.ms}ms`);
+  assert.ok(r.ms >= 9900, `returned too early: ${r.ms}ms`);
+  assert.ok(r.ms < 14000, `took too long: ${r.ms}ms`);
 });
 
 test("never prints the token", async () => {
