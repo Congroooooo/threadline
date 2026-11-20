@@ -1,0 +1,12 @@
+// Cloudflare Workers deployment for the Threadline API.
+// Secrets (DATABASE_URL, OAuth client secrets) are set with `wrangler secret put`, never here.
+// Local development reads .dev.vars (copy .dev.vars.example).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "threadline",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-01",
+  // No compatibility flags: no dependency needs nodejs_compat (Hono, arctic and the Neon
+  // driver all run on plain Workers APIs; pg is only used by src/node.ts).
+  "observability": { "enabled": true }
+}

@@ -4,3 +4,4 @@ packages:
   - "integrations/*"
 allowBuilds:
   esbuild: true
+  workerd: true

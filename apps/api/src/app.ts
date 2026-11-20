@@ -1,0 +1,48 @@
+// The Threadline HTTP API: sign-in under /auth, everything else under /api. Runs unchanged
+// on Cloudflare Workers (worker.ts) and Node (node.ts).
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { type Env, loadConfig } from "./env.js";
+import {
+  type AppDeps,
+  type AppEnv,
+  authenticate,
+  errorResponse,
+  fail,
+  originCheck,
+  resources,
+  workspaceActor,
+} from "./middleware.js";
+import { accountRoutes } from "./routes/account.js";
+import { agentRoutes } from "./routes/agent.js";
+import { authRoutes } from "./routes/auth.js";
+import { healthRoutes } from "./routes/health.js";
+import { workspaceRoutes } from "./routes/workspace.js";
+
+export type { AppDeps, AppEnv } from "./middleware.js";
+export type { Env } from "./env.js";
+
+/** Largest request body accepted: well above any valid request (text is capped at 10,000 characters). */
+export const MAX_BODY_BYTES = 256 * 1024;
+
+/** Builds the app. Throws when the environment is unsafe (see loadConfig), so it never starts. */
+export function createApp(env: Env, deps: AppDeps = {}): Hono<AppEnv> {
+  const config = loadConfig(env);
+  const app = new Hono<AppEnv>();
+  app.onError(errorResponse);
+  app.notFound((c) => c.json({ error: "not found" }, 404));
+
+  app.use("*", resources(config, deps));
+  app.use("*", bodyLimit({ maxSize: MAX_BODY_BYTES, onError: () => { throw fail(413, "request body too large"); } }));
+
+  app.route("/auth", authRoutes());
+  app.route("/api/health", healthRoutes());
+
+  app.use("/api/*", originCheck());
+  app.use("/api/*", authenticate);
+  app.use("/api/w/:workspaceId/*", workspaceActor);
+  app.route("/api/w/:workspaceId", workspaceRoutes());
+  app.route("/api/agent", agentRoutes());
+  app.route("/api", accountRoutes());
+  return app;
+}
