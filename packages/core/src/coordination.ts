@@ -250,6 +250,9 @@ export async function setBlockerCause(
   if (input.verified && actor.kind !== "member") throw new ForbiddenError("only a member may verify a cause");
   const cause = label(input.cause, "cause");
   if (b.status !== "open") throw new ValidationError("blocker is already resolved");
+  if (b.causeStatus === "verified" && actor.kind !== "member") {
+    throw new ForbiddenError("only a member may change a verified cause");
+  }
   const causeStatus: CauseStatus = input.verified ? "verified" : "suspected";
   await tx
     .update(blockers)

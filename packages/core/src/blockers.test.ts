@@ -56,6 +56,24 @@ describe("blockers", () => {
     });
   });
 
+  test("only a person can change a verified cause", async () => {
+    const id = await raise();
+    await t.inWs((tx) => setBlockerCause(tx, t.backendMember, { blockerId: id, cause: "bad creds", verified: true }));
+    const conn: Actor = { kind: "connection", workspaceId: t.workspaceId, connectionId: newId() };
+    for (const actor of [t.backendAgent, conn]) {
+      await expect(
+        t.inWs((tx) => setBlockerCause(tx, actor, { blockerId: id, cause: "something else", verified: false })),
+      ).rejects.toThrow(ForbiddenError);
+    }
+    expect(await t.inWs((tx) => getBlocker(tx, id))).toMatchObject({
+      causeStatus: "verified",
+      cause: "bad creds",
+      causeVerifiedBy: t.backendMember.memberId,
+    });
+    await t.inWs((tx) => setBlockerCause(tx, t.backendMember, { blockerId: id, cause: "revised", verified: false }));
+    expect(await t.inWs((tx) => getBlocker(tx, id))).toMatchObject({ causeStatus: "suspected", cause: "revised", causeVerifiedBy: null });
+  });
+
   test("an open blocker on a task shows in blockedBy and clears when resolved", async () => {
     const id = await raise({ taskId });
     expect((await t.inWs((tx) => blockedBy(tx, taskId))).blockers).toEqual([id]);
