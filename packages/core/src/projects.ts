@@ -1,6 +1,6 @@
 // Projects and their configuration. A repository maps to exactly one active project per
 // workspace, so findProjectByRepoUrl is unambiguous.
-import { and, arrayOverlaps, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, arrayContains, arrayOverlaps, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Tx } from "./db/client.js";
 import { projectConfig, projects } from "./db/schema.js";
 import { recordEvent } from "./events.js";
@@ -23,7 +23,7 @@ function isUniqueViolation(err: unknown): boolean {
 /**
  * Canonical `host/path` for a repository URL, so ssh and https forms of one repository
  * compare equal: credentials, scheme, the port of ssh forms, query, `.git` and trailing
- * slashes are dropped and the host is lower-cased. The path keeps its case.
+ * slashes are dropped and everything is lower-cased: GitHub and GitLab treat repo paths case-insensitively.
  */
 export function normalizeRepoUrl(url: string): string {
   if (typeof url !== "string") throw new ValidationError("repository URL must be a string");
@@ -56,7 +56,7 @@ export function normalizeRepoUrl(url: string): string {
     .replace(/\/+$/, "");
   host = host.toLowerCase();
   if (!/^[a-z0-9._-]+(:\d+)?$/.test(host) || path.length < 2) throw new ValidationError("repository URL is not valid");
-  return host + path;
+  return (host + path).toLowerCase();
 }
 
 function parseNotifier(n: NotifierConfig): NotifierConfig {
@@ -66,12 +66,18 @@ function parseNotifier(n: NotifierConfig): NotifierConfig {
   if (typeof n.webhookUrl !== "string" || n.webhookUrl.length > MAX_URL_LENGTH * 2) {
     throw new ValidationError("notifier webhookUrl must be an absolute https URL");
   }
-  const m = /^(https?):\/\/(?:[^@/?#\s]*@)?(\[[0-9a-f:]+\]|[a-z0-9._-]+)(?::\d+)?(?:[/?#]\S*)?$/i.exec(n.webhookUrl);
-  const local = m !== null && ["localhost", "127.0.0.1", "[::1]"].includes(m[2]!.toLowerCase());
-  if (!m || !(m[1]!.toLowerCase() === "https" || local)) {
-    throw new ValidationError("notifier webhookUrl must be an absolute https URL");
+  const bad = () => new ValidationError("notifier webhookUrl must be an absolute https URL");
+  if (n.webhookUrl.includes("\\") || /\s/.test(n.webhookUrl)) throw bad();
+  let u: InstanceType<typeof URL>;
+  try {
+    u = new URL(n.webhookUrl);
+  } catch {
+    throw bad();
   }
-  return { kind: n.kind, webhookUrl: n.webhookUrl };
+  if (u.username !== "" || u.password !== "") throw bad();
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+  if (!(u.protocol === "https:" || (u.protocol === "http:" && local))) throw bad();
+  return { kind: n.kind, webhookUrl: u.href };
 }
 
 /** NotFoundError unless every id is an existing, non-archived project of this workspace. */
@@ -186,7 +192,7 @@ export async function findProjectByRepoUrl(tx: Tx, repoUrl: string): Promise<str
     .select({ projectId: projectConfig.projectId })
     .from(projectConfig)
     .innerJoin(projects, eq(projects.id, projectConfig.projectId))
-    .where(and(isNull(projects.archivedAt), sql`${normalized} = ANY(${projectConfig.repoUrls})`))
+    .where(and(isNull(projects.archivedAt), arrayContains(projectConfig.repoUrls, [normalized])))
     .limit(1);
   return row?.projectId ?? null;
 }

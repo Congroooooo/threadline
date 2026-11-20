@@ -5,6 +5,7 @@ import { type Db, type Tx, withWorkspace } from "./db/client.js";
 import { assertAllTablesHaveForcedRls, createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
+import { createProject } from "./projects.js";
 import {
   addMember,
   archiveRole,
@@ -27,15 +28,19 @@ let userId: string;
 let workspaceId: string;
 let memberId: string;
 let admin: Actor;
-const projectId = newId();
-const projectA = newId();
-const projectB = newId();
+let projectId: string;
+let projectA: string;
+let projectB: string;
 
 beforeEach(async () => {
   db = await createTestDb();
   userId = await seedUser(db, "Dana");
   ({ workspaceId, memberId } = await createWorkspace(db, { name: "Studio", userId, displayName: "Dana" }));
   admin = { kind: "member", workspaceId, memberId };
+  const mk = (key: string) => withWorkspace(db, workspaceId, (tx) => createProject(tx, admin, { key, name: key }));
+  projectId = await mk("PRJ");
+  projectA = await mk("AAA");
+  projectB = await mk("BBB");
 });
 
 const check = (actor: Actor, p: Permission, project?: string) =>
@@ -67,7 +72,8 @@ describe("workspaces, members, roles and permissions", () => {
 
   test("creating a workspace records workspace.created in that workspace", async () => {
     const events = await withWorkspace(db, workspaceId, (tx) => listEvents(tx, {}));
-    expect(events.map((e) => e.type)).toEqual(["workspace.created"]);
+    expect(events.map((e) => e.type)[0]).toBe("workspace.created");
+    expect(events.filter((e) => e.type !== "project.created")).toHaveLength(1);
     expect(events[0]).toMatchObject({ actorKind: "member", actorId: memberId, subjectId: workspaceId });
   });
 
@@ -99,6 +105,18 @@ describe("workspaces, members, roles and permissions", () => {
     for (const k of ["pm", "lead", "backend"] as const)
       expect([...ROLE_TEMPLATES[k]].sort()).toEqual([...ROLE_TEMPLATES.frontend].sort());
     expect(ROLE_TEMPLATES.owner).toHaveLength(12);
+  });
+
+  test("roles can only be scoped to existing, active projects", async () => {
+    const dev = await member("Sam", []);
+    const set = (roleKeys: string[], project: string) =>
+      withWorkspace(db, workspaceId, (tx) => setMemberRoles(tx, admin, { memberId: memberIdOf(dev), roleKeys, projectId: project }));
+    await expect(set(["frontend"], newId())).rejects.toThrow(NotFoundError);
+    await expect(set(["frontend"], "nope")).rejects.toThrow(NotFoundError);
+    await set(["frontend"], projectA);
+    await rawQuery(db, `update projects set archived_at = now() where id = '${projectA}'`);
+    await expect(set(["backend"], projectA)).rejects.toThrow(NotFoundError);
+    await set([], projectA); // clearing stays possible
   });
 
   test("a project-scoped role does not apply to other projects", async () => {

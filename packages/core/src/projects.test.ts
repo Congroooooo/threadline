@@ -36,6 +36,8 @@ describe("normalizeRepoUrl", () => {
     expect(normalizeRepoUrl("https://gitlab.example.com/acme/app")).toBe(want);
     expect(normalizeRepoUrl("https://oauth2:tok@GitLab.example.com/acme/app.git/")).toBe(want);
     expect(normalizeRepoUrl("ssh://git@gitlab.example.com:2222/acme/app.git")).toBe(want);
+    expect(normalizeRepoUrl("https://GitHub.com/Acme/App")).toBe(normalizeRepoUrl("git@github.com:acme/app.git"));
+    expect(normalizeRepoUrl("https://GitHub.com/Acme/App")).toBe("github.com/acme/app");
     expect(normalizeRepoUrl("  https://gitlab.example.com/acme/app?tab=1#x ")).toBe(want);
     expect(normalizeRepoUrl("https://gitlab.example.com:8443/acme/app")).toBe("gitlab.example.com:8443/acme/app");
     expect(normalizeRepoUrl("https://gitlab.example.com/group/sub/app.git")).toBe("gitlab.example.com/group/sub/app");
@@ -56,6 +58,7 @@ describe("projects", () => {
       updateProjectConfig(tx, admin, id, { repoUrls: ["https://github.com/acme/app.git", "git@gitlab.example.com:acme/app.git"] }),
     );
     expect(await inWs((tx) => findProjectByRepoUrl(tx, "git@github.com:acme/app"))).toBe(id);
+    expect(await inWs((tx) => findProjectByRepoUrl(tx, "https://GitHub.com/Acme/App"))).toBe(id);
     expect(await inWs((tx) => findProjectByRepoUrl(tx, "https://GitLab.example.com/acme/app/"))).toBe(id);
     expect(await inWs((tx) => findProjectByRepoUrl(tx, "https://github.com/acme/web"))).toBeNull();
     expect((await inWs((tx) => getProject(tx, admin, id))).repoUrls).toEqual(["github.com/acme/app", "gitlab.example.com/acme/app"]);
@@ -134,12 +137,14 @@ describe("projects", () => {
   test("the notifier URL must be absolute https (http only for localhost)", async () => {
     const id = await inWs((tx) => createProject(tx, admin, { key: "APP", name: "App" }));
     const set = (webhookUrl: string, kind: any = "slack") => inWs((tx) => updateProjectConfig(tx, admin, id, { notifier: { kind, webhookUrl } }));
-    for (const bad of ["", "not a url", "/hooks/x", "http://chat.example.com/h", "ftp://chat.example.com/h", "javascript:alert(1)"]) {
+    for (const bad of ["", "not a url", "/hooks/x", "http://chat.example.com/h", "ftp://chat.example.com/h", "javascript:alert(1)",
+      "http://evil.com\@localhost/x", "http://localhost.evil.com/x", "http://localhost@evil.com/x", "https://user:pw@example.com/x", "https://user@example.com/x"]) {
       await expect(set(bad), bad).rejects.toThrow(ValidationError);
     }
     await expect(set(hook, "teams")).rejects.toThrow(ValidationError);
     await set("http://localhost:8065/hooks/x");
     await set("http://127.0.0.1/hooks/x");
+    await set("https://chat.example.com/hooks/x");
     await set(hook);
   });
 

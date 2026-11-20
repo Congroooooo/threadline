@@ -3,6 +3,7 @@ import { type Db, type Tx, withSystem } from "./db/client.js";
 import { agentIdentities, memberRoles, members, roles, users, workspaces } from "./db/schema.js";
 import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
+import { requireActiveProjects } from "./projects.js";
 import { cleanText } from "./safety.js";
 import {
   type Actor,
@@ -275,6 +276,8 @@ export async function setMemberRoles(
   await activeMember(tx, input.memberId);
   const found = await activeRoleIds(tx, input.roleKeys);
   const projectId = input.projectId ?? null;
+  // Clearing roles stays allowed for an archived project; granting needs a live one.
+  if (projectId !== null && found.length > 0) await requireActiveProjects(tx, [projectId]);
   await keepingAnAdmin(tx, async (sp) => {
     await sp
       .update(memberRoles)

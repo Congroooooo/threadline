@@ -4,3 +4,8 @@ declare var crypto: {
   getRandomValues<T extends Uint8Array>(array: T): T;
   subtle: { digest(algorithm: "SHA-256", data: Uint8Array): Promise<ArrayBuffer> };
 };
+
+// The slice of the WHATWG URL class used by projects.ts (global on Workers and Node).
+declare var URL: {
+  new (input: string): { protocol: string; hostname: string; username: string; password: string; href: string };
+};
