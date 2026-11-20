@@ -152,6 +152,21 @@ export const authenticate: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/**
+ * Agents only (the MCP endpoint): an Authorization header `Bearer tl_…` that resolves to an
+ * active agent token. Cookies are ignored. Anything else is 401 before the route runs.
+ */
+export const agentBearer: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const token = BEARER.exec(c.req.header("authorization")?.trim() ?? "")?.[1];
+  const actor = token ? await resolveAgentToken(c.var.db, token) : null;
+  if (!actor || actor.kind !== "agent") {
+    return c.json({ error: "invalid or revoked agent token" }, 401, { "WWW-Authenticate": 'Bearer realm="threadline"' });
+  }
+  c.set("principal", { kind: "agent", actor });
+  c.set("actor", actor);
+  await next();
+};
+
 /** The signed-in person's user id; agents get 403 on routes meant for people. */
 export function requireUser(c: Ctx): string {
   const p = c.var.principal;

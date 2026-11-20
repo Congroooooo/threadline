@@ -1,11 +1,12 @@
-// The Threadline HTTP API: sign-in under /auth, everything else under /api. Runs unchanged
-// on Cloudflare Workers (worker.ts) and Node (node.ts).
+// The Threadline HTTP API: sign-in under /auth, the MCP endpoint at /mcp, everything else
+// under /api. Runs unchanged on Cloudflare Workers (worker.ts) and Node (node.ts).
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type Env, loadConfig } from "./env.js";
 import {
   type AppDeps,
   type AppEnv,
+  agentBearer,
   authenticate,
   errorResponse,
   fail,
@@ -13,6 +14,7 @@ import {
   resources,
   workspaceActor,
 } from "./middleware.js";
+import { mcpHandler } from "./mcp.js";
 import { accountRoutes } from "./routes/account.js";
 import { agentRoutes } from "./routes/agent.js";
 import { authRoutes } from "./routes/auth.js";
@@ -37,6 +39,9 @@ export function createApp(env: Env, deps: AppDeps = {}): Hono<AppEnv> {
 
   app.route("/auth", authRoutes());
   app.route("/api/health", healthRoutes());
+
+  // Agents only, by bearer token (so no Origin check and no cookies). See mcp.ts.
+  app.all("/mcp", agentBearer, mcpHandler);
 
   app.use("/api/*", originCheck());
   app.use("/api/*", authenticate);

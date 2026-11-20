@@ -2,16 +2,13 @@
 // workspace (middleware.workspaceActor); permissions are checked by core.
 import {
   archiveRole,
-  blockerMessage,
   createAgentToken,
   createHandoff,
   createInvite,
   createProject,
   createTask,
   getProject,
-  getTaskContext,
   getTaskContextById,
-  handoffMessage,
   listAgentTokens,
   listBlockers,
   listEvents,
@@ -21,7 +18,6 @@ import {
   listRoles,
   listTasks,
   myOpenItems,
-  notifyProject,
   raiseBlocker,
   removeMember,
   reportProgress,
@@ -42,6 +38,7 @@ import {
 } from "@threadline/core";
 import { Hono } from "hono";
 import { type AppEnv, body, type Ctx, fail, inWorkspace, query, uuidParam } from "../middleware.js";
+import { blockerNotice, handoffNotice, notifyLater } from "../notices.js";
 import {
   blockerCauseSchema,
   blockerListQuerySchema,
@@ -66,21 +63,6 @@ import {
 
 
 const OK = { ok: true } as const;
-
-/** The role's display name, for chat messages. */
-async function roleName(tx: Tx, roleId: string): Promise<string> {
-  return (await listRoles(tx)).find((r) => r.id === roleId)?.name ?? "unknown role";
-}
-
-/** Sends a chat message for the project after the response; never fails the request. */
-function notifyLater(c: Ctx, projectId: string, text: string, link: string): void {
-  const { db, fetchImpl, defer, actor } = c.var;
-  defer(notifyProject(db, actor.workspaceId, projectId, { text, link }, fetchImpl));
-}
-
-function taskLink(c: Ctx, taskId: string): string {
-  return `${c.var.config.publicUrl}/w/${c.var.actor.workspaceId}/tasks/${taskId}`;
-}
 
 /** A task of the path's project, by ref or id, after checking the caller may read the project. */
 async function taskIn(tx: Tx, c: Ctx, projectId: string, ref: string): Promise<string> {
@@ -250,21 +232,16 @@ export function workspaceRoutes(): Hono<AppEnv> {
   app.post("/projects/:projectId/handoffs", async (c) => {
     const projectId = uuidParam(c, "projectId");
     const { task, ...input } = await body(c, createHandoffSchema);
-    const { result, message } = await inWorkspace(c, async (tx, actor) => {
+    const { result, notice } = await inWorkspace(c, async (tx, actor) => {
       const taskId = await taskIn(tx, c, projectId, task);
       const result = await createHandoff(tx, actor, { taskId, ...input });
-      if (!result.created) return { result, message: null };
-      const context = await getTaskContext(tx, actor, { projectId, task: taskId });
-      const view = context.handoffs.find((h) => h.id === result.handoffId);
-      const text = handoffMessage({
-        ref: context.task.ref,
-        fromName: view?.from.text ?? "someone",
-        toRoleName: await roleName(tx, input.toRoleId),
-        unassigned: result.unassigned,
+      if (!result.created) return { result, notice: null };
+      const notice = await handoffNotice(tx, actor, c.var.config.publicUrl, {
+        projectId, taskId, handoffId: result.handoffId, toRoleId: input.toRoleId, unassigned: result.unassigned,
       });
-      return { result, message: { text, link: taskLink(c, taskId) } };
+      return { result, notice };
     });
-    if (message) notifyLater(c, projectId, message.text, message.link);
+    if (notice) notifyLater(c, c.var.actor.workspaceId, notice);
     return c.json(result, result.created ? 201 : 200);
   });
 
@@ -286,15 +263,15 @@ export function workspaceRoutes(): Hono<AppEnv> {
   app.post("/projects/:projectId/blockers", async (c) => {
     const projectId = uuidParam(c, "projectId");
     const { task, ...input } = await body(c, raiseBlockerSchema);
-    const { id, message } = await inWorkspace(c, async (tx, actor) => {
+    const { id, notice } = await inWorkspace(c, async (tx, actor) => {
       const taskId = task === undefined ? undefined : await taskIn(tx, c, projectId, task);
       const id = await raiseBlocker(tx, actor, { projectId, ...(taskId ? { taskId } : {}), ...input });
-      const ref = taskId ? (await getTaskContext(tx, actor, { projectId, task: taskId })).task.ref : undefined;
-      const text = blockerMessage({ ...(ref ? { ref } : {}), ownerRoleName: await roleName(tx, input.ownerRoleId) });
-      const link = taskId ? taskLink(c, taskId) : `${c.var.config.publicUrl}/w/${actor.workspaceId}/projects/${projectId}`;
-      return { id, message: { text, link } };
+      const notice = await blockerNotice(tx, actor, c.var.config.publicUrl, {
+        projectId, ...(taskId ? { taskId } : {}), ownerRoleId: input.ownerRoleId,
+      });
+      return { id, notice };
     });
-    notifyLater(c, projectId, message.text, message.link);
+    notifyLater(c, c.var.actor.workspaceId, notice);
     return c.json({ id }, 201);
   });
 
