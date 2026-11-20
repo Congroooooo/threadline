@@ -2,8 +2,9 @@
 --
 -- Run as the table owner. Application code connects as app_user, which is not
 -- superuser, has no BYPASSRLS and owns nothing, so every policy below applies to it.
--- Production creates app_user (with a password) in the Neon console; this only
--- creates it where it is missing, without a password.
+-- Production creates app_user (with a password) with SQL in the Neon console's SQL
+-- Editor, as the owner (not on the Roles page; see README "The app_user role"); this
+-- only creates it where it is missing, without a password.
 
 DO $$
 BEGIN

@@ -25,14 +25,14 @@ There are two ways to run Threadline. Both run the same code.
 
 The Worker serves the API and the built web app as static assets; Neon provides Postgres.
 
-1. **Neon.** Create a project with a database named `threadline`. The connection string Neon shows you uses the owner role: that one is your `MIGRATION_DATABASE_URL`.
+1. **Neon.** Create a project with a database named `threadline`, in the region closest to your team: almost every request is a few database round trips, and the Worker uses Smart Placement to run next to the database. The connection string Neon shows you uses the owner role: that one is your `MIGRATION_DATABASE_URL`.
 2. **The `app_user` role.** In the Neon console's SQL Editor, as the owner, run:
 
    ```sql
    CREATE ROLE app_user LOGIN PASSWORD '<a long random password>' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
    ```
 
-   The running app always connects as `app_user`, which owns no tables, so forced row-level security applies to every query. Do not give the Worker the owner's connection string: the app refuses to start, and `GET /api/health` reports an error, when its role is a superuser, has `BYPASSRLS` or owns tables. Migration `0001` only creates `app_user` (without a password) where it is missing.
+   The running app always connects as `app_user`, which owns no tables, so forced row-level security applies to every query. Do not give the Worker the owner's connection string. An unsafe role (a superuser, `BYPASSRLS`, owning tables, or a member of a role that is or does any of these) is caught differently per runtime: on Node the app refuses to start, but a Worker has no startup step, so there only `GET /api/health` reports it. That is why step 6 is required after every deploy. Migration `0001` only creates `app_user` (without a password) where it is missing.
 3. **Migrate**, from a checkout on your machine:
 
    ```sh
@@ -49,7 +49,7 @@ The Worker serves the API and the built web app as static assets; Neon provides 
    ```
 
    This builds `apps/web`, then runs `wrangler deploy`. `/api/*`, `/auth/*` and `/mcp` go to the Worker; every other path is the web app. (Use `pnpm run deploy`: plain `pnpm deploy` is a built-in pnpm command.) Set `PUBLIC_URL` to the Worker's URL, register the OAuth callbacks (below), and deploy again if you changed anything.
-6. **Check** with `curl https://<your-worker>/api/health` (expect `{"ok":true}`) and the [end-to-end check](#end-to-end-check).
+6. **Check (required after every deploy)** with `curl https://<your-worker>/api/health`. Expect `{"ok":true}`; anything else means the Worker is connected with an unsafe database role and must not be used until `DATABASE_URL` is fixed. Then run the [end-to-end check](#end-to-end-check).
 
 ### Option B: Docker Compose (self-hosted)
 
@@ -57,9 +57,9 @@ The Worker serves the API and the built web app as static assets; Neon provides 
 docker compose up -d --build
 ```
 
-This starts Postgres 16, applies the migrations as the database owner, and starts Threadline on Node at <http://localhost:8787> with `AUTH_MODE=local` (one local user, no sign-in provider). The Postgres init script creates `app_user` with a password, and the app connects as `app_user`, never as the owner.
+This starts Postgres 16, applies the migrations as the database owner, and starts Threadline on Node at <http://localhost:8787> with `AUTH_MODE=local` (one local user, no sign-in provider). The port is published on `127.0.0.1` only, and in local mode the API refuses requests whose `Host` is not `localhost`, `127.0.0.1` or `[::1]`. The Postgres init script creates `app_user` with a password, and the app connects as `app_user`, never as the owner.
 
-To serve a team, put these in a `.env` file next to `docker-compose.yml` (it is ignored by git) before the first start, and put Threadline behind an HTTPS reverse proxy:
+To serve a team, put these in a `.env` file next to `docker-compose.yml` (it is ignored by git) before the first start, and put Threadline behind an HTTPS reverse proxy on the same machine (it forwards to `127.0.0.1:8787`):
 
 ```sh
 POSTGRES_PASSWORD=<long random password>   # the owner role, used only by the migrate service
@@ -122,6 +122,8 @@ E2E_TOKEN_A=tl_... E2E_TOKEN_B=tl_... pnpm e2e -- --url https://threadline.examp
   --workspace <id from the /w/<id> address> --project ACME --task ACME-1 --role-b frontend \
   --repo <a repository URL in the project's settings; default: this checkout's origin>
 ```
+
+The hosted run leaves a pending handoff on the task and posts a chat pointer if the project has a notifier, so run it against a dedicated test project (and task), not a real one.
 
 Local mode has one user, so there both tokens belong to one member who holds every role. `--token-a` and `--token-b` also work, but pnpm prints a script's arguments, so the environment variables keep tokens out of your terminal history.
 
