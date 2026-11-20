@@ -16,7 +16,7 @@ export const events = pgTable(
     id: uuid("id").primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id),
     projectId: uuid("project_id"),
-    actorKind: text("actor_kind", { enum: ["member", "agent", "connection"] }).notNull(),
+    actorKind: text("actor_kind", { enum: ["member", "agent", "connection", "system"] }).notNull(),
     actorId: uuid("actor_id").notNull(),
     type: text("type").notNull(),
     subjectKind: text("subject_kind").notNull(),

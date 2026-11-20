@@ -98,3 +98,4 @@ export {
   type TaskContext,
   type TaskView,
 } from "./context.js";
+export { createNotifier, notifyProject, handoffMessage, blockerMessage, type Notifier } from "./notify/index.js";
