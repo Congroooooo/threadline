@@ -5,12 +5,21 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/db/testing.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.1",
+    "drizzle-orm": "^0.45.4",
     "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "drizzle-kit": "^0.31.11"
   }
 }
