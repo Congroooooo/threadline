@@ -4,4 +4,6 @@ packages:
   - "integrations/*"
 allowBuilds:
   esbuild: true
+  # Prebuilt binaries ship as optional packages; the install script is only a fallback.
+  sharp: false
   workerd: true
