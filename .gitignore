@@ -1,0 +1,11 @@
+node_modules
+dist
+.dev.vars
+.wrangler
+.env*
+*.tsbuildinfo
+coverage
+research_notes/
+reports/
+.superpowers/
+threadline-export-*
