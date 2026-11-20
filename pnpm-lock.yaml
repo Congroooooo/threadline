@@ -22,11 +22,14 @@ importers:
         version: 1.2.1
       drizzle-orm:
         specifier: ^0.45.4
-        version: 0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.1)
+        version: 0.45.4(@cloudflare/workers-types@5.20261119.1)(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.1)
       uuid:
         specifier: ^11.0.0
         version: 11.1.1
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20261119.1
+        version: 5.20261119.1
       '@electric-sql/pglite':
         specifier: ^0.5.16
         version: 0.5.16
@@ -35,6 +38,9 @@ importers:
         version: 0.31.11
 
 packages:
+
+  '@cloudflare/workers-types@5.20261119.1':
+    resolution: {integrity: sha512-TSAVVAUehPUN1idYKaUwJTUhrdKBdlb1jdbA0+OaLQgHHCnOT32oAexu/Aw48CG2NpzSZ7kqi6nIFcO/+t6k5w==}
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
@@ -1037,6 +1043,8 @@ packages:
 
 snapshots:
 
+  '@cloudflare/workers-types@5.20261119.1': {}
+
   '@drizzle-team/brocli@0.10.2': {}
 
   '@electric-sql/pglite@0.5.16': {}
@@ -1435,8 +1443,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.15
 
-  drizzle-orm@0.45.4(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.1):
+  drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261119.1)(@electric-sql/pglite@0.5.16)(@neondatabase/serverless@1.2.1):
     optionalDependencies:
+      '@cloudflare/workers-types': 5.20261119.1
       '@electric-sql/pglite': 0.5.16
       '@neondatabase/serverless': 1.2.1
 

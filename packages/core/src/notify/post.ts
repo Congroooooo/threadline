@@ -27,5 +27,7 @@ export async function postJson(fetchImpl: typeof fetch, url: string, body: unkno
     const name = (err as { name?: string } | null)?.name;
     throw new NotifyError(name === "TimeoutError" || name === "AbortError" ? "timeout" : "network_error");
   }
+  // Release the connection: Workers keeps it open until the body is read or cancelled.
+  await res.body?.cancel().catch(() => {});
   if (res.status < 200 || res.status >= 300) throw new NotifyError("http_error", res.status);
 }

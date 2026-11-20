@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { type Db, withWorkspace } from "../db/client.js";
-import { createTestDb, seedUser } from "../db/testing.js";
+import { closeTestDbs, createTestDb, seedUser } from "../db/testing.js";
 import { listEvents } from "../events.js";
 import { createProject, updateProjectConfig } from "../projects.js";
 import { createWorkspace } from "../tenancy.js";
@@ -118,6 +118,36 @@ describe("notifiers", () => {
     });
     expect(m).not.toMatch(/[\n\u0000]/);
     expect(m.length).toBeLessThan(160);
+  });
+
+  test("names cannot carry chat mentions, markup or bidi controls, and are cut on code points", () => {
+    const m = handoffMessage({ ref: "ACME-1", fromName: "<!channel> @all ‮x", toRoleName: "QA", unassigned: false });
+    expect(m).toBe("Handoff on ACME-1 from !channel all x to QA.");
+    const emoji = handoffMessage({ ref: "R", fromName: "\u{1F600}".repeat(100), toRoleName: "QA", unassigned: false });
+    expect(emoji).toContain("\u{1F600}".repeat(59) + "…");
+    expect(emoji).not.toContain("\u{1F600}".repeat(60));
+  });
+
+  test("the response body is cancelled on 2xx, non-2xx and 3xx", async () => {
+    for (const status of [200, 500, 302]) {
+      let cancelled = 0;
+      const f = (async () => {
+        const body = new ReadableStream({
+          cancel() {
+            cancelled++;
+          },
+        });
+        return new Response(body, { status });
+      }) as typeof fetch;
+      await createNotifier({ kind: "slack", webhookUrl: "https://chat.test/hook" }, f).send({ text: "x" }).catch(() => {});
+      expect(cancelled, `status ${status}`).toBe(1);
+    }
+  });
+
+  test("a database error while reading config does not throw", async () => {
+    const s = await setup(true);
+    await closeTestDbs();
+    await expect(notifyProject(s.db, s.workspaceId, s.projectId, { text: "x" }, fakeFetch([], 200))).resolves.toBeUndefined();
   });
 
   test("requests time out after 5 seconds", async () => {

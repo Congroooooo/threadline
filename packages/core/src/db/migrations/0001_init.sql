@@ -25,7 +25,7 @@ CREATE TABLE events (
   id uuid PRIMARY KEY,
   workspace_id uuid NOT NULL REFERENCES workspaces (id),
   project_id uuid,
-  actor_kind text NOT NULL CHECK (actor_kind IN ('member', 'agent', 'connection')),
+  actor_kind text NOT NULL CHECK (actor_kind IN ('member', 'agent', 'connection', 'system')),
   actor_id uuid NOT NULL,
   type text NOT NULL,
   subject_kind text NOT NULL,

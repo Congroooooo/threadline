@@ -71,8 +71,15 @@ export async function notifyProject(
 
 /** A display name made safe for a chat line: control characters removed, length capped. */
 function safeName(s: string): string {
-  const t = s.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ").replace(/\s+/g, " ").trim();
-  return t.length > 60 ? `${t.slice(0, 59)}…` : t;
+  // Control and format characters (bidi, zero-width) become spaces; @ < > are dropped so a
+  // name cannot trigger a chat mention or markup.
+  const t = s
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
+    .replace(/[@<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chars = Array.from(t);
+  return chars.length > 60 ? `${chars.slice(0, 59).join("")}…` : t;
 }
 
 export function handoffMessage(view: { ref: string; fromName: string; toRoleName: string; unassigned: boolean }): string {
