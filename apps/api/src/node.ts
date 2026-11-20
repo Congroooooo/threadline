@@ -35,9 +35,11 @@ async function main(): Promise<void> {
   const app = new Hono();
   app.all("/api/*", (c) => api.fetch(c.req.raw));
   app.all("/auth/*", (c) => api.fetch(c.req.raw));
+  app.all("/mcp", (c) => api.fetch(c.req.raw));
 
   const webDist = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
-  if (existsSync(webDist)) {
+  // `wrangler dev` creates an empty dist (its assets directory must exist), so look for index.html.
+  if (existsSync(resolve(webDist, "index.html"))) {
     const root = relative(process.cwd(), webDist) || ".";
     app.use("*", serveStatic({ root }));
     // Single-page app: unknown paths get index.html.

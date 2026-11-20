@@ -1,5 +1,7 @@
-// Cloudflare Workers deployment for the Threadline API.
-// Secrets (DATABASE_URL, OAuth client secrets) are set with `wrangler secret put`, never here.
+// Cloudflare Workers deployment for Threadline: the API plus the built web app as static assets.
+// Deploy from the repository root with `pnpm run deploy` (builds apps/web, then `wrangler deploy`).
+// Secrets and settings (DATABASE_URL, PUBLIC_URL, AUTH_MODE, OAuth credentials,
+// WORKSPACE_CREATORS) are set with `wrangler secret put`, never here: this file is committed.
 // Local development reads .dev.vars (copy .dev.vars.example).
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
@@ -8,5 +10,14 @@
   "compatibility_date": "2026-11-01",
   // No compatibility flags: no dependency needs nodejs_compat (Hono, arctic and the Neon
   // driver all run on plain Workers APIs; pg is only used by src/node.ts).
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  "assets": {
+    // Built by `pnpm --filter @threadline/web build` (part of `pnpm run deploy`).
+    "directory": "../web/dist",
+    // Unknown paths get index.html, so the web app's client-side routes load directly.
+    "not_found_handling": "single-page-application",
+    // The API, sign-in and MCP paths always reach the Worker, even for browser navigations
+    // (the OAuth redirects) that would otherwise get the single-page fallback.
+    "run_worker_first": ["/api/*", "/auth/*", "/mcp"]
+  }
 }

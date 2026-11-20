@@ -5,13 +5,24 @@
   "type": "module",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.2.2",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "dev": "pnpm --parallel --filter @threadline/api --filter @threadline/web dev",
     "test": "pnpm -r --no-bail --if-present test",
-    "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck && tsc -p scripts",
+    "lint": "pnpm -r --if-present typecheck && tsc -p scripts",
+    "migrate": "tsx scripts/migrate.ts",
+    "e2e": "tsx scripts/e2e.ts",
+    "deploy": "pnpm --filter @threadline/web build && pnpm --filter @threadline/api run deploy"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }

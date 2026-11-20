@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/.wrangler
+**/.dev.vars
+**/.env*
+.git
+.superpowers
+.impeccable
+reports
+research_notes
+coverage
+threadline-export-*

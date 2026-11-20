@@ -1,0 +1,13 @@
+# Secret scan configuration (CI: gitleaks/gitleaks-action). The default rules apply; the
+# only exceptions are the obviously fake values that the redaction tests and the plan use
+# to prove that secrets are scrubbed. Allow exact fake values here, never whole files.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake secrets used as redaction test fixtures"
+regexTarget = "match"
+regexes = [
+  '''glpat-abcdefghij(klmnopqrst|0123456789)''',
+  '''AKIAABCDEFGHIJKLMNOP''',
+]

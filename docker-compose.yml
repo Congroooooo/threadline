@@ -1,0 +1,66 @@
+# Self-hosting with Docker Compose: Postgres 16, the migrations, then Threadline on Node.
+#
+#   docker compose up -d --build      then open http://localhost:8787
+#
+# Defaults suit a local try-out (AUTH_MODE=local, one local user, localhost only). For a
+# shared server put the variables below in a .env file next to this one (never commit it):
+# strong POSTGRES_PASSWORD and APP_USER_PASSWORD, an https PUBLIC_URL, AUTH_MODE=oauth and
+# the OAuth app credentials. The passwords only take effect when the volume is first created.
+name: threadline
+
+x-image: &image
+  build: .
+  image: threadline:local
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: threadline
+      POSTGRES_USER: threadline_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-owner-local-only}
+      APP_USER_PASSWORD: ${APP_USER_PASSWORD:-app-local-only}
+    volumes:
+      - db:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U threadline_owner -d threadline"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Applies packages/core/src/db/migrations as the owner role, then exits.
+  migrate:
+    <<: *image
+    working_dir: /app
+    command: ["node_modules/.bin/tsx", "scripts/migrate.ts"]
+    environment:
+      MIGRATION_DATABASE_URL: postgres://threadline_owner:${POSTGRES_PASSWORD:-owner-local-only}@db:5432/threadline
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    <<: *image
+    ports:
+      - "${THREADLINE_PORT:-8787}:8787"
+    environment:
+      # Always app_user, never the owner: GET /api/health and startup refuse an unsafe role.
+      DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD:-app-local-only}@db:5432/threadline
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8787}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID:-}
+      GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET:-}
+      GITLAB_BASE_URL: ${GITLAB_BASE_URL:-https://gitlab.com}
+      WORKSPACE_CREATORS: ${WORKSPACE_CREATORS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  db:
