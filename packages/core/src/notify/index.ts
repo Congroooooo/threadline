@@ -83,8 +83,16 @@ function safeName(s: string): string {
   return chars.length > 60 ? `${chars.slice(0, 59).join("")}…` : t;
 }
 
-export function handoffMessage(view: { ref: string; fromName: string; toRoleName: string; unassigned: boolean }): string {
-  const base = `Handoff on ${safeName(view.ref)} from ${safeName(view.fromName)} to ${safeName(view.toRoleName)}.`;
+/** `fromAgent` appends " (agent)" after cleaning, since the cleaning drops parentheses. */
+export function handoffMessage(view: {
+  ref: string;
+  fromName: string;
+  fromAgent?: boolean;
+  toRoleName: string;
+  unassigned: boolean;
+}): string {
+  const from = `${safeName(view.fromName)}${view.fromAgent ? " (agent)" : ""}`;
+  const base = `Handoff on ${safeName(view.ref)} from ${from} to ${safeName(view.toRoleName)}.`;
   return view.unassigned ? `${base} Nobody holds that role yet.` : base;
 }
 

@@ -29,6 +29,15 @@ async function startSession(c: Ctx, userId: string): Promise<void> {
 export function authRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // Which sign-in options this deployment offers, so the sign-in page shows only those.
+  app.get("/providers", (c) =>
+    c.json({
+      github: oauthProvider(c.var.config, "github") !== null,
+      gitlab: oauthProvider(c.var.config, "gitlab") !== null,
+      local: c.var.config.authMode === "local",
+    }),
+  );
+
   app.get("/:provider/start", (c) => {
     const provider = oauthProvider(c.var.config, c.req.param("provider"));
     if (!provider) throw fail(404, "sign-in provider not available");

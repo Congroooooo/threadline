@@ -11,6 +11,9 @@
   // No compatibility flags: no dependency needs nodejs_compat (Hono, arctic and the Neon
   // driver all run on plain Workers APIs; pg is only used by src/node.ts).
   "observability": { "enabled": true },
+  // Smart Placement runs the Worker near the database (Neon) instead of near each user, so
+  // the several queries of one request (e.g. the session-start hook) each make a short trip.
+  "placement": { "mode": "smart" },
   "assets": {
     // Built by `pnpm --filter @threadline/web build` (part of `pnpm run deploy`).
     "directory": "../web/dist",
@@ -19,5 +22,7 @@
     // The API, sign-in and MCP paths always reach the Worker, even for browser navigations
     // (the OAuth redirects) that would otherwise get the single-page fallback.
     "run_worker_first": ["/api/*", "/auth/*", "/mcp"]
+    // Static responses get their security headers from apps/web/public/_headers, which Workers
+    // static assets apply (the Worker adds the same headers to its own responses).
   }
 }

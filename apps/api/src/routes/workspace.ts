@@ -32,6 +32,7 @@ import {
   setBlockerCause,
   setMemberRoles,
   setTaskStatus,
+  ForbiddenError,
   type Tx,
   updateProjectConfig,
   upsertRole,
@@ -70,12 +71,22 @@ async function taskIn(tx: Tx, c: Ctx, projectId: string, ref: string): Promise<s
   return resolveTaskRef(tx, projectId, ref);
 }
 
+/** Refuses agent tokens: the route returns other people's names unquoted. */
+function membersOnly(c: Ctx): void {
+  if (c.var.actor.kind !== "member") throw new ForbiddenError("this list is only available to members");
+}
+
 export function workspaceRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   // Members and roles ------------------------------------------------------------------
 
-  app.get("/members", async (c) => c.json(await inWorkspace(c, (tx) => listMembers(tx))));
+  // Member and role lists are for people (the web app). Agents get 403: they never need the
+  // member list, and MCP has its own role lookups that return names as Quoted.
+  app.get("/members", async (c) => {
+    membersOnly(c);
+    return c.json(await inWorkspace(c, (tx) => listMembers(tx)));
+  });
 
   app.put("/members/:memberId/roles", async (c) => {
     const memberId = uuidParam(c, "memberId");
@@ -90,7 +101,10 @@ export function workspaceRoutes(): Hono<AppEnv> {
     return c.json(OK);
   });
 
-  app.get("/roles", async (c) => c.json(await inWorkspace(c, (tx) => listRoles(tx))));
+  app.get("/roles", async (c) => {
+    membersOnly(c);
+    return c.json(await inWorkspace(c, (tx) => listRoles(tx)));
+  });
 
   app.post("/roles", async (c) => {
     const input = await body(c, upsertRoleSchema);

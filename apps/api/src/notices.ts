@@ -19,7 +19,7 @@ async function roleName(tx: Tx, roleId: string): Promise<string> {
 }
 
 function taskLink(publicUrl: string, workspaceId: string, taskId: string): string {
-  return `${publicUrl}/w/${workspaceId}/tasks/${taskId}`;
+  return `${publicUrl}/w/${workspaceId}/t/${taskId}`;
 }
 
 /** The notice for a handoff just created on `taskId` (call inside the creating transaction). */
@@ -31,9 +31,14 @@ export async function handoffNotice(
 ): Promise<Notice> {
   const context = await getTaskContext(tx, actor, { projectId: input.projectId, task: input.taskId });
   const view = context.handoffs.find((h) => h.id === input.handoffId);
+  // Agent names arrive as "<owner> (agent)"; the chat cleaning drops parentheses, so the
+  // suffix is passed as a flag and re-added after cleaning.
+  const fromAgent = view?.from.source.startsWith("agent:") ?? false;
+  const fromText = view?.from.text ?? "someone";
   const text = handoffMessage({
     ref: context.task.ref,
-    fromName: view?.from.text ?? "someone",
+    fromName: fromAgent ? fromText.replace(/ \(agent\)$/, "") : fromText,
+    fromAgent,
     toRoleName: await roleName(tx, input.toRoleId),
     unassigned: input.unassigned,
   });
@@ -50,7 +55,7 @@ export async function blockerNotice(
   const { projectId, taskId } = input;
   const ref = taskId ? (await getTaskContext(tx, actor, { projectId, task: taskId })).task.ref : undefined;
   const text = blockerMessage({ ...(ref ? { ref } : {}), ownerRoleName: await roleName(tx, input.ownerRoleId) });
-  const link = taskId ? taskLink(publicUrl, actor.workspaceId, taskId) : `${publicUrl}/w/${actor.workspaceId}/projects/${projectId}`;
+  const link = taskId ? taskLink(publicUrl, actor.workspaceId, taskId) : `${publicUrl}/w/${actor.workspaceId}/p/${projectId}`;
   return { projectId, text, link };
 }
 

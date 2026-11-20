@@ -11,6 +11,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Hono } from "hono";
 import pg from "pg";
 import { createApp } from "./app.js";
+import { securityHeaders } from "./middleware.js";
 import { ENV_KEYS, type Env } from "./env.js";
 
 function readEnv(): Env {
@@ -33,6 +34,8 @@ async function main(): Promise<void> {
   if (!health.ok) throw new Error(`refusing to start: ${health.reason}`);
 
   const app = new Hono();
+  // The API sets these itself; this covers the static web app (Workers use web/public/_headers).
+  app.use("*", securityHeaders);
   app.all("/api/*", (c) => api.fetch(c.req.raw));
   app.all("/auth/*", (c) => api.fetch(c.req.raw));
   app.all("/mcp", (c) => api.fetch(c.req.raw));

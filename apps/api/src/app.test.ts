@@ -50,12 +50,36 @@ describe("configuration", () => {
     expect(() => createApp({ ...baseEnv, PUBLIC_URL: "https://example.com/" })).not.toThrow();
   });
 
+  test("local mode only answers requests addressed to localhost", async () => {
+    const local = await harness({ AUTH_MODE: "local", PUBLIC_URL: "http://localhost:8787" });
+    const health = (host: string) => local.app.request("/api/health", { headers: { host } });
+    for (const host of ["localhost:8787", "localhost", "127.0.0.1:8787", "[::1]:8787", "LOCALHOST:8787"]) {
+      expect((await health(host)).status, host).toBe(200);
+    }
+    for (const host of ["192.168.1.20:8787", "threadline.example.com", "localhost.evil.test:8787", "evil.test"]) {
+      expect((await health(host)).status, host).toBe(403);
+    }
+    // Without a Host header, the request URL's host decides.
+    expect((await local.app.request("http://attacker.test/api/health")).status).toBe(403);
+    // OAuth mode is unaffected.
+    expect((await h.call("GET", "/api/health", undefined, undefined, { host: "threadline.example.com" })).status).toBe(200);
+  });
+
+  test("API responses carry the security headers, errors included", async () => {
+    for (const res of [await h.call("GET", "/api/health"), await h.call("GET", "/api/me"), await h.call("GET", "/nowhere")]) {
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    }
+  });
+
   test("the health check passes for app_user, which is no superuser, cannot bypass RLS and owns no tables", async () => {
     expect(await json(h.call("GET", "/api/health"), 200)).toEqual({ ok: true });
   });
 
   test("an unsafe database role fails the health check with a generic reason", async () => {
-    const owner = { execute: async () => ({ rows: [{ role: "neondb_owner", superuser: false, bypassrls: true, owned: 12 }] }) } as unknown as Db;
+    const owner = { execute: async () => ({ rows: [{ role: "neondb_owner", superuser: null, bypassrls: "neondb_owner", owned: 12 }] }) } as unknown as Db;
     const res = await createApp(baseEnv, { db: owner }).request("/api/health");
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ ok: false, reason: "database role is not safe" });
@@ -197,6 +221,15 @@ describe("workspaces and people", () => {
     expect((await h.call("GET", `/api/w/${ws}/tokens`, boToken)).status).toBe(403);
   });
 
+  test("member and role lists are refused to agents but open to members", async () => {
+    const bo = await join("Bo", ["backend"]);
+    const boToken = await agentToken(bo.cookie, "bo-agent");
+    expect((await h.call("GET", `/api/w/${ws}/members`, boToken)).status).toBe(403);
+    expect((await h.call("GET", `/api/w/${ws}/roles`, boToken)).status).toBe(403);
+    await json(h.call("GET", `/api/w/${ws}/members`, bo.cookie), 200);
+    await json(h.call("GET", `/api/w/${ws}/roles`, bo.cookie), 200);
+  });
+
   test("invites can be revoked and agent tokens revoked", async () => {
     const { inviteId, code } = await json(h.call("POST", `/api/w/${ws}/invites`, dana, { roleKeys: ["backend"] }), 201);
     await json(h.call("POST", `/api/w/${ws}/invites/${inviteId}/revoke`, dana), 200);
@@ -235,6 +268,9 @@ describe("work over HTTP", () => {
     expect(h.fetch.calls).toHaveLength(1);
     expect(h.fetch.calls[0]!.url).toBe(HOOK);
     expect(JSON.parse(h.fetch.calls[0]!.body).text).toContain("Handoff on ACME-1 from Bo (agent) to Frontend.");
+    // the link opens the task page of the web app (route /w/:ws/t/:taskId)
+    expect(JSON.parse(h.fetch.calls[0]!.body).text).toBe(
+      `Handoff on ACME-1 from Bo (agent) to Frontend.\n${ORIGIN}/w/${ws}/t/${taskId}`);
 
     // frontend agent: GET open-items → the handoff; POST respond → 403
     const items = await json(h.call("GET", `/api/w/${ws}/projects/${acme}/open-items`, frontendAgent), 200);
@@ -277,6 +313,8 @@ describe("work over HTTP", () => {
     }), 201);
     expect(h.fetch.calls).toHaveLength(1);
     expect(JSON.parse(h.fetch.calls[0]!.body).text).toContain("Blocker raised, owned by Backend.");
+    // without a task, the link opens the project page of the web app (route /w/:ws/p/:projectId)
+    expect(JSON.parse(h.fetch.calls[0]!.body).text).toBe(`Blocker raised, owned by Backend.\n${ORIGIN}/w/${ws}/p/${acme}`);
     // Agents may only suspect a cause.
     expect((await h.call("POST", `/api/w/${ws}/blockers/${id}/cause`, agent, { cause: "Expired cert", verified: true })).status).toBe(403);
     await json(h.call("POST", `/api/w/${ws}/blockers/${id}/cause`, agent, { cause: "Expired cert", verified: false }), 200);

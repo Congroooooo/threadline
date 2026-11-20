@@ -10,8 +10,10 @@ import {
   authenticate,
   errorResponse,
   fail,
+  localHostOnly,
   originCheck,
   resources,
+  securityHeaders,
   workspaceActor,
 } from "./middleware.js";
 import { mcpHandler } from "./mcp.js";
@@ -34,6 +36,8 @@ export function createApp(env: Env, deps: AppDeps = {}): Hono<AppEnv> {
   app.onError(errorResponse);
   app.notFound((c) => c.json({ error: "not found" }, 404));
 
+  app.use("*", securityHeaders);
+  app.use("*", localHostOnly(config));
   app.use("*", resources(config, deps));
   app.use("*", bodyLimit({ maxSize: MAX_BODY_BYTES, onError: () => { throw fail(413, "request body too large"); } }));
 

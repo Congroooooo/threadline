@@ -140,6 +140,14 @@ describe("OAuth sign-in", () => {
     expect(me.user).toMatchObject({ displayName: "Sam Lee", identities: [{ provider: "gitlab", login: "sam" }] });
   });
 
+  test("GET /auth/providers lists the sign-in options this deployment offers", async () => {
+    expect(await json((await harness()).app.request("/auth/providers"), 200)).toEqual({ github: true, gitlab: false, local: false });
+    const both = await harness({ GITLAB_CLIENT_ID: "gl-client", GITLAB_CLIENT_SECRET: "gl-secret" });
+    expect(await json(both.app.request("/auth/providers"), 200)).toEqual({ github: true, gitlab: true, local: false });
+    const local = await harness({ AUTH_MODE: "local", PUBLIC_URL: "http://localhost:8787" });
+    expect(await json(local.app.request("/auth/providers"), 200)).toEqual({ github: false, gitlab: false, local: true });
+  });
+
   test("a provider without client credentials is not offered; a failed exchange signs nobody in", async () => {
     const h = await harness();
     expect((await h.app.request("/auth/gitlab/start")).status).toBe(404);

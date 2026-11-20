@@ -45,7 +45,10 @@ services:
   app:
     <<: *image
     ports:
-      - "${THREADLINE_PORT:-8787}:8787"
+      # Published on the loopback interface only: local mode signs anyone in, and the API
+      # also refuses any Host other than localhost in local mode. For a shared server, put a
+      # TLS reverse proxy on the same machine in front of 127.0.0.1:8787.
+      - "127.0.0.1:${THREADLINE_PORT:-8787}:8787"
     environment:
       # Always app_user, never the owner: GET /api/health and startup refuse an unsafe role.
       DATABASE_URL: postgres://app_user:${APP_USER_PASSWORD:-app-local-only}@db:5432/threadline

@@ -69,6 +69,50 @@ export function errorResponse(err: unknown, c: Context): Response {
 }
 
 // ---------------------------------------------------------------------------------------
+// Response hardening
+
+/** Sent on every API response; apps/web/public/_headers sets the same on the static app. */
+export const SECURITY_HEADERS: Record<string, string> = {
+  "X-Frame-Options": "DENY",
+  "Content-Security-Policy": "frame-ancestors 'none'",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+};
+
+export const securityHeaders: MiddlewareHandler = async (c, next) => {
+  await next();
+  const apply = () => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      if (!c.res.headers.has(name)) c.res.headers.set(name, value);
+    }
+  };
+  try {
+    apply();
+  } catch {
+    // Immutable headers (a response passed through from fetch): copy it first.
+    c.res = new Response(c.res.body, c.res);
+    apply();
+  }
+};
+
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/i;
+
+/**
+ * Local mode signs anyone in without a password, so it must only answer the local machine.
+ * Refuses (403) any request whose Host header is not localhost, 127.0.0.1 or [::1] (any port),
+ * which also stops DNS-rebinding pages from reaching the API through a browser.
+ */
+export function localHostOnly(config: Config): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    if (config.authMode === "local") {
+      const host = c.req.header("host") ?? new URL(c.req.url).host;
+      if (!LOCAL_HOST.test(host)) return c.json({ error: "local mode only answers requests to localhost" }, 403);
+    }
+    await next();
+  };
+}
+
+// ---------------------------------------------------------------------------------------
 // Per-request resources
 
 /**
