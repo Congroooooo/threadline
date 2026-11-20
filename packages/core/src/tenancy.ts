@@ -124,6 +124,13 @@ async function workspaceAdminCount(tx: Tx): Promise<number> {
  */
 function keepingAnAdmin<T>(tx: Tx, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return tx.transaction(async (sp) => {
+    // Serialise admin-affecting changes per workspace. Under READ COMMITTED two concurrent
+    // changes (say removing admin X and admin Y) would each still see the other admin and
+    // both commit, leaving none. Locking the workspace row makes the second wait, and its
+    // count below then sees the first one's committed change.
+    await sp.execute(
+      sql`select 1 from workspaces where id = NULLIF(current_setting('app.workspace_id', true), '')::uuid for update`,
+    );
     const result = await fn(sp);
     if ((await workspaceAdminCount(sp)) === 0) {
       throw new ValidationError("the workspace must keep at least one member with workspace.admin");
@@ -228,8 +235,11 @@ export async function addMember(
       .where(and(eq(memberRoles.memberId, memberId), isNull(memberRoles.revokedAt)));
   } else {
     memberId = newId();
+    // In a savepoint, so an unknown user leaves the caller's transaction usable.
     try {
-      await tx.insert(members).values({ id: memberId, workspaceId: actor.workspaceId, userId: input.userId, displayName });
+      await tx.transaction((sp) =>
+        sp.insert(members).values({ id: memberId, workspaceId: actor.workspaceId, userId: input.userId, displayName }),
+      );
     } catch (err) {
       if (isForeignKeyViolation(err)) throw new NotFoundError("user not found");
       throw err;
@@ -335,7 +345,11 @@ export async function upsertRole(
   const unknown = input.permissions.filter((p) => !PERMISSIONS.includes(p));
   if (unknown.length > 0) throw new ValidationError(`unknown permissions: ${unknown.join(", ")}`);
   const permissions = PERMISSIONS.filter((p) => input.permissions.includes(p));
-  const [existing] = await tx.select({ id: roles.id }).from(roles).where(eq(roles.key, input.key));
+  const [existing] = await tx
+    .select({ id: roles.id, archivedAt: roles.archivedAt })
+    .from(roles)
+    .where(eq(roles.key, input.key));
+  if (existing && existing.archivedAt !== null) throw new ValidationError("role is archived; restore it first");
   return keepingAnAdmin(tx, async (sp) => {
     const id = existing?.id ?? newId();
     if (existing) {

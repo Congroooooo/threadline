@@ -1,5 +1,7 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, test } from "vitest";
-import { type Db, withWorkspace } from "./db/client.js";
+import { type Db, type Tx, withWorkspace } from "./db/client.js";
 import { assertAllTablesHaveForcedRls, createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
@@ -18,7 +20,7 @@ import {
   setMemberRoles,
   upsertRole,
 } from "./tenancy.js";
-import { type Actor, ForbiddenError, HUMAN_ONLY, type Permission, ValidationError } from "./types.js";
+import { type Actor, ForbiddenError, HUMAN_ONLY, NotFoundError, type Permission, ValidationError } from "./types.js";
 
 let db: Db;
 let userId: string;
@@ -253,5 +255,49 @@ describe("workspaces, members, roles and permissions", () => {
     const rows = await withWorkspace(db, workspaceId, (tx) => tx.execute("select count(*)::int as n from users"));
     expect((rows as unknown as { rows: { n: number }[] }).rows[0]!.n).toBe(0);
     expect((await rawQuery(db, "select count(*)::int as n from users"))[0].n).toBe(1);
+  });
+
+  test("guarded changes lock the workspace row so concurrent admin changes serialise", async () => {
+    // PGlite has one connection, so blocking cannot be shown; check the lock is taken, and runs.
+    const dev = await member("Ida", ["frontend"]);
+    const dialect = new PgDialect();
+    const statements: string[] = [];
+    const bound = <T extends object>(target: T, wrap: (key: PropertyKey, value: any) => any) =>
+      new Proxy(target, {
+        get(t, key) {
+          const value = Reflect.get(t, key, t);
+          return typeof value === "function" ? wrap(key, value.bind(t)) : value;
+        },
+      });
+    await withWorkspace(db, workspaceId, async (tx) => {
+      const spy = bound(tx, (key, fn) => key !== "transaction" ? fn
+        : (cb: (sp: Tx) => unknown) => fn((sp: Tx) => cb(bound(sp, (k, f) => k !== "execute" ? f
+          : (q: SQL) => { statements.push(dialect.sqlToQuery(q).sql); return f(q); }))));
+      await setMemberRoles(spy, admin, { memberId: memberIdOf(dev), roleKeys: ["backend"] });
+      await removeMember(spy, admin, memberIdOf(dev));
+    });
+    expect(statements.filter((q) => /from workspaces .*for update/i.test(q))).toHaveLength(2);
+    expect(await check(dev, "task.write")).toBe(false);
+  });
+
+  test("adding an unknown user fails with NotFoundError and leaves the transaction usable", async () => {
+    await withWorkspace(db, workspaceId, async (tx) => {
+      await expect(addMember(tx, admin, { userId: newId(), displayName: "Nobody", roleKeys: [] }))
+        .rejects.toThrow(NotFoundError);
+      await upsertRole(tx, admin, { key: "qa", name: "QA", permissions: ["blocker.write"] });
+      expect((await listMembers(tx)).map((m) => m.displayName)).toEqual(["Dana"]);
+    });
+    expect((await withWorkspace(db, workspaceId, (tx) => listRoles(tx))).some((r) => r.key === "qa")).toBe(true);
+  });
+
+  test("upserting an archived role is refused until it is restored", async () => {
+    const fe = (await withWorkspace(db, workspaceId, (tx) => listRoles(tx))).find((r) => r.key === "frontend")!;
+    await withWorkspace(db, workspaceId, (tx) => archiveRole(tx, admin, fe.id));
+    await expect(withWorkspace(db, workspaceId, (tx) =>
+      upsertRole(tx, admin, { key: "frontend", name: "FE", permissions: ["project.read"] })))
+      .rejects.toThrow(/archived; restore it first/);
+    await withWorkspace(db, workspaceId, (tx) => restoreRole(tx, admin, fe.id));
+    await expect(withWorkspace(db, workspaceId, (tx) =>
+      upsertRole(tx, admin, { key: "frontend", name: "FE", permissions: ["project.read"] }))).resolves.toBe(fe.id);
   });
 });
