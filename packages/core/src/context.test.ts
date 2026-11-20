@@ -4,6 +4,8 @@ import {
   getByRef,
   getTaskContext,
   getTaskContextById,
+  listBlockers,
+  listTasks,
   myOpenItems,
   type OpenItems,
   renderSessionContext,
@@ -11,12 +13,12 @@ import {
   SESSION_CONTEXT_FIRST_LINE,
   SESSION_CONTEXT_MAX,
 } from "./context.js";
-import { createHandoff, raiseBlocker, respondToHandoff } from "./coordination.js";
+import { createHandoff, raiseBlocker, resolveBlocker, respondToHandoff } from "./coordination.js";
 import { newId } from "./ids.js";
 import { type Actor, ForbiddenError, NotFoundError, type Quoted, ValidationError } from "./types.js";
 import { type Agent, seedTeam, type Team } from "./work.fixture.js";
 import { setMemberRoles } from "./tenancy.js";
-import { addDependency, createTask, reportProgress } from "./work.js";
+import { addDependency, createTask, reportProgress, setTaskStatus } from "./work.js";
 
 const PR = "https://git.example.com/acme/app/-/merge_requests/7";
 
@@ -125,6 +127,34 @@ describe("myOpenItems", () => {
   test("connections cannot ask for open items", async () => {
     const conn: Actor = { kind: "connection", workspaceId: t.workspaceId, connectionId: newId() };
     await expect(t.inWs((tx) => myOpenItems(tx, conn, { projectId }))).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describe("listTasks and listBlockers", () => {
+  test("listTasks returns the project's tasks by number as quoted views, optionally by status", async () => {
+    const all = await t.inWs((tx) => listTasks(tx, t.owner, { projectId }));
+    expect(all.map((x) => x.ref)).toEqual(["ACME-1", "ACME-2"]);
+    expect(all[0]!.title).toEqual(quoted(`task:${task1}`));
+    expect(all[0]!.description).toEqual(quoted(`task:${task1}`));
+    expect(all.map((x) => x.blocked)).toEqual([false, true]); // task2 has an open blocker
+    await t.inWs((tx) => setTaskStatus(tx, t.backendMember, task1, "in_progress"));
+    expect((await t.inWs((tx) => listTasks(tx, frontendAgent, { projectId, status: "in_progress" }))).map((x) => x.ref))
+      .toEqual(["ACME-1"]);
+    expect(await t.inWs((tx) => listTasks(tx, t.owner, { projectId, status: "done" }))).toEqual([]);
+    await expect(t.inWs((tx) => listTasks(tx, frontendAgent, { projectId: t.other }))).rejects.toThrow(ForbiddenError);
+    await expect(t.inWs((tx) => listTasks(tx, t.owner, { projectId, status: "shipped" as "done" }))).rejects.toThrow(ValidationError);
+  });
+
+  test("listBlockers returns every blocker of the project, whoever owns it, optionally by status", async () => {
+    const open = await t.inWs((tx) => listBlockers(tx, frontendAgent, { projectId, status: "open" }));
+    expect(open.map((b) => b.observed.text)).toEqual(["list endpoint returns 500", "backend only"]);
+    expect(open[0]).toMatchObject({ id: frontendBlocker, taskRef: "ACME-2", ownerRole: "frontend", observed: quoted(`blocker:${frontendBlocker}`) });
+    await t.inWs((tx) => resolveBlocker(tx, t.frontendMember, { blockerId: frontendBlocker, resolution: "added the index" }));
+    expect((await t.inWs((tx) => listBlockers(tx, t.owner, { projectId, status: "open" }))).map((b) => b.taskRef)).toEqual([null]);
+    expect((await t.inWs((tx) => listBlockers(tx, t.owner, { projectId, status: "resolved" }))).map((b) => b.id)).toEqual([frontendBlocker]);
+    expect(await t.inWs((tx) => listBlockers(tx, t.owner, { projectId }))).toHaveLength(2);
+    await expect(t.inWs((tx) => listBlockers(tx, frontendAgent, { projectId: t.other }))).rejects.toThrow(ForbiddenError);
+    await expect(t.inWs((tx) => listBlockers(tx, t.owner, { projectId, status: "gone" as "open" }))).rejects.toThrow(ValidationError);
   });
 });
 

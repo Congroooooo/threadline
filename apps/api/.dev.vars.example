@@ -3,7 +3,7 @@
 
 # Postgres connection string for the app_user role (not the owner: see GET /api/health).
 DATABASE_URL=postgres://app_user:change-me@localhost:5432/threadline
-# Where people open Threadline; OAuth callbacks and cookie checks use its origin.
+# Where people open Threadline: an origin only, no path. OAuth callbacks and cookie checks use it.
 PUBLIC_URL=http://localhost:8787
 # "oauth" (GitHub and/or GitLab) or "local" (single local user; localhost PUBLIC_URL only).
 AUTH_MODE=local
@@ -19,4 +19,7 @@ GITLAB_BASE_URL=https://gitlab.com
 
 # Who may create workspaces, comma-separated: github:<login>,gitlab:<username>.
 # Empty means anyone who signs in. Everyone else joins through an invite.
+# These match the provider's current login, which people can change: a renamed account
+# stops matching, and whoever takes over an old login would match. Review this list when
+# someone renames their account.
 WORKSPACE_CREATORS=

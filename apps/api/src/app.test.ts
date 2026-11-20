@@ -46,10 +46,19 @@ describe("configuration", () => {
     expect(() => createApp({ ...baseEnv, AUTH_MODE: "local", PUBLIC_URL: "http://127.0.0.1:8787" })).not.toThrow();
     expect(() => createApp({ ...baseEnv, AUTH_MODE: "other" as "local" })).toThrow();
     expect(() => createApp({ ...baseEnv, PUBLIC_URL: "not a url" })).toThrow();
+    expect(() => createApp({ ...baseEnv, PUBLIC_URL: "https://example.com/threadline" })).toThrow(/path/);
+    expect(() => createApp({ ...baseEnv, PUBLIC_URL: "https://example.com/" })).not.toThrow();
   });
 
   test("the health check passes for app_user, which is no superuser, cannot bypass RLS and owns no tables", async () => {
     expect(await json(h.call("GET", "/api/health"), 200)).toEqual({ ok: true });
+  });
+
+  test("an unsafe database role fails the health check with a generic reason", async () => {
+    const owner = { execute: async () => ({ rows: [{ role: "neondb_owner", superuser: false, bypassrls: true, owned: 12 }] }) } as unknown as Db;
+    const res = await createApp(baseEnv, { db: owner }).request("/api/health");
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ ok: false, reason: "database role is not safe" });
   });
 
   test("unexpected errors are a bare 500 that leaks no message", async () => {
@@ -170,6 +179,24 @@ describe("workspaces and people", () => {
     expect((await h.call("GET", `/api/w/${ws}/projects`, sam.cookie)).status).toBe(403);
   });
 
+  test("admins list pending invites; people list their own tokens, admins everyone's", async () => {
+    const { inviteId, code } = await json(h.call("POST", `/api/w/${ws}/invites`, dana, { roleKeys: ["backend"] }), 201);
+    const invites = await json(h.call("GET", `/api/w/${ws}/invites`, dana), 200);
+    expect(invites).toEqual([expect.objectContaining({ id: inviteId, roleKeys: ["backend"], createdByName: "Dana" })]);
+    expect(JSON.stringify(invites)).not.toContain(code);
+
+    const bo = await join("Bo", ["backend"]);
+    expect((await h.call("GET", `/api/w/${ws}/invites`, bo.cookie)).status).toBe(403);
+    const boToken = await agentToken(bo.cookie, "bo-agent");
+    await agentToken(dana, "dana-agent");
+    const own = await json(h.call("GET", `/api/w/${ws}/tokens`, bo.cookie), 200);
+    expect(own).toEqual([expect.objectContaining({ name: "bo-agent", ownerName: "Bo", projectIds: [acme], revokedAt: null })]);
+    expect(JSON.stringify(own)).not.toContain(boToken);
+    expect((await json(h.call("GET", `/api/w/${ws}/tokens`, dana), 200)).map((t: { name: string }) => t.name))
+      .toEqual(["bo-agent", "dana-agent"]);
+    expect((await h.call("GET", `/api/w/${ws}/tokens`, boToken)).status).toBe(403);
+  });
+
   test("invites can be revoked and agent tokens revoked", async () => {
     const { inviteId, code } = await json(h.call("POST", `/api/w/${ws}/invites`, dana, { roleKeys: ["backend"] }), 201);
     await json(h.call("POST", `/api/w/${ws}/invites/${inviteId}/revoke`, dana), 200);
@@ -257,6 +284,34 @@ describe("work over HTTP", () => {
     expect((await json(h.call("GET", `/api/w/${ws}/projects/${acme}/open-items`, bo.cookie), 200)).blockers).toEqual([]);
   });
 
+  test("tasks and blockers of a project are listed, optionally by status", async () => {
+    const bo = await join("Bo", ["backend"]);
+    const mk = (title: string) =>
+      json(h.call("POST", `/api/w/${ws}/projects/${acme}/tasks`, bo.cookie, { title, ownerRoleId: roleIds.backend }), 201);
+    const first = await mk("First <b>task</b>");
+    await mk("Second");
+    await json(h.call("POST", `/api/w/${ws}/tasks/${first.taskId}/status`, bo.cookie, { status: "in_review" }), 200);
+    const { id: blockerId } = await json(h.call("POST", `/api/w/${ws}/projects/${acme}/blockers`, bo.cookie, {
+      task: "ACME-2",
+      observed: "CI is red",
+      ownerRoleId: roleIds.frontend,
+    }), 201);
+
+    const tasks = await json(h.call("GET", `/api/w/${ws}/projects/${acme}/tasks`, bo.cookie), 200);
+    expect(tasks.map((t: { ref: string; status: string; blocked: boolean }) => [t.ref, t.status, t.blocked]))
+      .toEqual([["ACME-1", "in_review", false], ["ACME-2", "todo", true]]);
+    expect(tasks[0].title).toEqual({ untrusted: true, source: `task:${first.taskId}`, text: "First <b>task</b>" });
+    const inReview = await json(h.call("GET", `/api/w/${ws}/projects/${acme}/tasks?status=in_review`, bo.cookie), 200);
+    expect(inReview.map((t: { ref: string }) => t.ref)).toEqual(["ACME-1"]);
+    expect((await h.call("GET", `/api/w/${ws}/projects/${acme}/tasks?status=shipped`, bo.cookie)).status).toBe(400);
+
+    // Bo does not own the blocker (frontend does), but the project list shows it.
+    const blockers = await json(h.call("GET", `/api/w/${ws}/projects/${acme}/blockers?status=open`, bo.cookie), 200);
+    expect(blockers).toEqual([expect.objectContaining({ id: blockerId, taskRef: "ACME-2", ownerRole: "frontend" })]);
+    expect(await json(h.call("GET", `/api/w/${ws}/projects/${acme}/blockers?status=resolved`, bo.cookie), 200)).toEqual([]);
+    expect((await h.call("GET", `/api/w/${ws}/projects/${acme}/blockers?status=closed`, bo.cookie)).status).toBe(400);
+  });
+
   test("a 12,000 character note returns 400", async () => {
     const { taskId } = await json(h.call("POST", `/api/w/${ws}/projects/${acme}/tasks`, dana, {
       title: "Long notes",
@@ -309,6 +364,13 @@ describe("work over HTTP", () => {
     expect((await get("branch=main")).status).toBe(400);
     expect((await get(`repo=${encodeURIComponent(REPO)}`, bo.cookie)).status).toBe(403);
     expect((await h.call("GET", `/api/agent/session-context?repo=${encodeURIComponent(REPO)}`)).status).toBe(401);
+
+    // A repository whose project is outside the agent's scope is as quiet as an unknown one.
+    const { id: web } = await json(h.call("POST", `/api/w/${ws}/projects`, dana, { key: "WEB", name: "Web" }), 201);
+    await json(h.call("PATCH", `/api/w/${ws}/projects/${web}/config`, dana, { repoUrls: ["https://git.example.com/acme/web"] }), 200);
+    const outside = await get(`repo=${encodeURIComponent("https://git.example.com/acme/web")}`);
+    expect(outside.status).toBe(200);
+    expect(await outside.text()).toBe("");
 
     // Nothing open for someone without tasks there.
     const fia = await join("Fia", ["frontend"]);

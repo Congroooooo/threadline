@@ -12,10 +12,14 @@ import {
   getTaskContext,
   getTaskContextById,
   handoffMessage,
+  listAgentTokens,
+  listBlockers,
   listEvents,
+  listInvites,
   listMembers,
   listProjects,
   listRoles,
+  listTasks,
   myOpenItems,
   notifyProject,
   raiseBlocker,
@@ -40,6 +44,8 @@ import { Hono } from "hono";
 import { type AppEnv, body, type Ctx, fail, inWorkspace, query, uuidParam } from "../middleware.js";
 import {
   blockerCauseSchema,
+  blockerListQuerySchema,
+  taskListQuerySchema,
   createHandoffSchema,
   createInviteSchema,
   createProjectSchema,
@@ -137,6 +143,8 @@ export function workspaceRoutes(): Hono<AppEnv> {
 
   // Invites and agent tokens -----------------------------------------------------------
 
+  app.get("/invites", async (c) => c.json(await inWorkspace(c, (tx, actor) => listInvites(tx, actor))));
+
   app.post("/invites", async (c) => {
     const input = await body(c, createInviteSchema);
     return c.json(await inWorkspace(c, (tx, actor) => createInvite(tx, actor, input)), 201);
@@ -147,6 +155,8 @@ export function workspaceRoutes(): Hono<AppEnv> {
     await inWorkspace(c, (tx, actor) => revokeInvite(tx, actor, inviteId));
     return c.json(OK);
   });
+
+  app.get("/tokens", async (c) => c.json(await inWorkspace(c, (tx, actor) => listAgentTokens(tx, actor))));
 
   app.post("/tokens", async (c) => {
     const input = await body(c, createTokenSchema);
@@ -204,6 +214,12 @@ export function workspaceRoutes(): Hono<AppEnv> {
 
   // Tasks ------------------------------------------------------------------------------
 
+  app.get("/projects/:projectId/tasks", async (c) => {
+    const projectId = uuidParam(c, "projectId");
+    const { status } = query(c, taskListQuerySchema);
+    return c.json(await inWorkspace(c, (tx, actor) => listTasks(tx, actor, { projectId, ...(status ? { status } : {}) })));
+  });
+
   app.post("/projects/:projectId/tasks", async (c) => {
     const projectId = uuidParam(c, "projectId");
     const input = await body(c, createTaskSchema);
@@ -260,6 +276,12 @@ export function workspaceRoutes(): Hono<AppEnv> {
   });
 
   // Blockers ---------------------------------------------------------------------------
+
+  app.get("/projects/:projectId/blockers", async (c) => {
+    const projectId = uuidParam(c, "projectId");
+    const { status } = query(c, blockerListQuerySchema);
+    return c.json(await inWorkspace(c, (tx, actor) => listBlockers(tx, actor, { projectId, ...(status ? { status } : {}) })));
+  });
 
   app.post("/projects/:projectId/blockers", async (c) => {
     const projectId = uuidParam(c, "projectId");

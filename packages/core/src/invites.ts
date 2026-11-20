@@ -1,6 +1,6 @@
 // How a teammate joins a workspace: an admin creates a single-use code, the teammate signs
 // in and accepts it, and becomes a member with the invite's roles.
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
 import { type Db, type Tx, withSystem } from "./db/client.js";
 import { invites, memberRoles, members, users } from "./db/schema.js";
 import { recordEvent } from "./events.js";
@@ -177,4 +177,35 @@ export async function revokeInvite(tx: Tx, actor: Actor, inviteId: string): Prom
     subjectId: inviteId,
     ...(invite.projectId !== null ? { projectId: invite.projectId } : {}),
   });
+}
+
+/**
+ * Invites still waiting to be used (not used, revoked or expired), oldest first, with who
+ * made them. Needs workspace.admin. Codes are never returned (only their hash is stored).
+ */
+export async function listInvites(tx: Tx, actor: Actor): Promise<{
+  id: string;
+  roleKeys: string[];
+  projectId: string | null;
+  createdBy: string;
+  createdByName: string;
+  expiresAt: string;
+  createdAt: string;
+}[]> {
+  await requirePermission(tx, actor, "workspace.admin");
+  const rows = await tx
+    .select({
+      id: invites.id,
+      roleKeys: invites.roleKeys,
+      projectId: invites.projectId,
+      createdBy: invites.createdBy,
+      createdByName: members.displayName,
+      expiresAt: invites.expiresAt,
+      createdAt: invites.createdAt,
+    })
+    .from(invites)
+    .innerJoin(members, eq(members.id, invites.createdBy))
+    .where(open())
+    .orderBy(asc(invites.id));
+  return rows.map((r) => ({ ...r, expiresAt: r.expiresAt.toISOString(), createdAt: r.createdAt.toISOString() }));
 }

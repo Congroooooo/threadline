@@ -6,7 +6,7 @@ import { invites } from "./db/schema.js";
 import { createTestDb, rawQuery, seedUser } from "./db/testing.js";
 import { listEvents } from "./events.js";
 import { newId } from "./ids.js";
-import { acceptInvite, createInvite, revokeInvite } from "./invites.js";
+import { acceptInvite, createInvite, listInvites, revokeInvite } from "./invites.js";
 import { createProject } from "./projects.js";
 import { hashSecret } from "./tokens.js";
 import { addMember, archiveRole, createWorkspace, listMembers, listRoles, removeMember } from "./tenancy.js";
@@ -34,6 +34,27 @@ const inWs = <T>(fn: Parameters<typeof withWorkspace<T>>[2]) => withWorkspace(db
 const INVALID = "invite is invalid or expired";
 
 describe("invites", () => {
+  test("listInvites shows pending invites to admins only, never their codes", async () => {
+    const a = await inWs((tx) => createInvite(tx, admin, { roleKeys: ["frontend"], projectId }));
+    const b = await inWs((tx) => createInvite(tx, admin, { roleKeys: ["backend", "approver"] }));
+    const used = await inWs((tx) => createInvite(tx, admin, { roleKeys: ["frontend"] }));
+    const sam = await acceptInvite(db, { userId: newUser, displayName: "Sam", code: used.code });
+    const revoked = await inWs((tx) => createInvite(tx, admin, { roleKeys: [] }));
+    await inWs((tx) => revokeInvite(tx, admin, revoked.inviteId));
+    const expired = await inWs((tx) => createInvite(tx, admin, { roleKeys: [] }));
+    await rawQuery(db, `update invites set expires_at = now() - interval '1 second' where id = '${expired.inviteId}'`);
+
+    const list = await inWs((tx) => listInvites(tx, admin));
+    expect(list).toEqual([
+      { id: a.inviteId, roleKeys: ["frontend"], projectId, createdBy: (admin as { memberId: string }).memberId, createdByName: "Dana", expiresAt: expect.any(String), createdAt: expect.any(String) },
+      { id: b.inviteId, roleKeys: ["approver", "backend"], projectId: null, createdBy: (admin as { memberId: string }).memberId, createdByName: "Dana", expiresAt: expect.any(String), createdAt: expect.any(String) },
+    ]);
+    expect(JSON.stringify(list)).not.toContain(a.code);
+    expect(JSON.stringify(list)).not.toMatch(/[0-9a-f]{64}/);
+    const member: Actor = { kind: "member", workspaceId, memberId: sam.memberId };
+    await expect(inWs((tx) => listInvites(tx, member))).rejects.toThrow(ForbiddenError);
+  });
+
   test("an invite adds the user with the invite's roles, once", async () => {
     const { code } = await inWs((tx) => createInvite(tx, admin, { roleKeys: ["frontend"] }));
     expect(code).toMatch(/^tli_[A-Za-z0-9_-]{32}$/);

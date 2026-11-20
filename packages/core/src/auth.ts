@@ -5,7 +5,7 @@ import { recordEvent } from "./events.js";
 import { newId } from "./ids.js";
 import { requireActiveProjects } from "./projects.js";
 import { capText, cleanText } from "./safety.js";
-import { isForeignKeyViolation, label, requirePermission } from "./tenancy.js";
+import { can, isForeignKeyViolation, label, requirePermission } from "./tenancy.js";
 import {
   AGENT_TOKEN_BYTES,
   AGENT_TOKEN_PREFIX,
@@ -229,6 +229,41 @@ export async function revokeAgentToken(tx: Tx, actor: Actor, agentId: string): P
   if (row.revokedAt !== null) return;
   await tx.update(agentIdentities).set({ revokedAt: sql`now()` }).where(eq(agentIdentities.id, agentId));
   await recordEvent(tx, { actor, type: "agent_token.revoked", subjectKind: "agent", subjectId: agentId });
+}
+
+/**
+ * Agent tokens, oldest first, revoked ones included: a member's own, or every member's for
+ * a workspace admin. Agents cannot list tokens. Tokens and hashes are never returned.
+ */
+export async function listAgentTokens(tx: Tx, actor: Actor): Promise<{
+  id: string;
+  memberId: string;
+  ownerName: string;
+  name: string;
+  projectIds: string[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}[]> {
+  requireHuman(actor, "list agent tokens");
+  const all = await can(tx, actor, "workspace.admin");
+  const rows = await tx
+    .select({
+      id: agentIdentities.id,
+      memberId: agentIdentities.memberId,
+      ownerName: members.displayName,
+      name: agentIdentities.name,
+      projectIds: agentIdentities.projectIds,
+      createdAt: agentIdentities.createdAt,
+      lastUsedAt: agentIdentities.lastUsedAt,
+      revokedAt: agentIdentities.revokedAt,
+    })
+    .from(agentIdentities)
+    .innerJoin(members, eq(members.id, agentIdentities.memberId))
+    .where(all ? undefined : eq(agentIdentities.memberId, actor.memberId))
+    .orderBy(asc(agentIdentities.id));
+  const iso = (d: Date | null) => (d === null ? null : d.toISOString());
+  return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString(), lastUsedAt: iso(r.lastUsedAt), revokedAt: iso(r.revokedAt) }));
 }
 
 /**

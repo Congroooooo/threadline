@@ -49,10 +49,16 @@ export function authRoutes(): Hono<AppEnv> {
     const cookiePath = { ...base(c.var.config, `/auth/${provider.name}`) };
     deleteCookie(c, STATE_COOKIE, cookiePath);
     deleteCookie(c, VERIFIER_COOKIE, cookiePath);
+    // Every failure sends the browser back to the app, which shows a sign-in error; the
+    // reason is logged, never put in the URL.
+    const failed = (reason: string, err?: unknown) => {
+      if (err === undefined) console.warn(`oauth sign-in failed: ${reason}`);
+      else console.error(`oauth sign-in failed: ${reason}`, err);
+      return c.redirect(`${c.var.config.publicUrl}/?signin=failed`, 302);
+    };
     const parsed = oauthCallbackQuerySchema.safeParse(c.req.query());
-    if (!parsed.success || !expectedState || !verifier || parsed.data.state !== expectedState) {
-      throw fail(400, "sign-in failed: the request did not match the one this browser started; try again");
-    }
+    if (!parsed.success) return failed(c.req.query("error") ? "the provider returned an error" : "malformed callback");
+    if (!expectedState || !verifier || parsed.data.state !== expectedState) return failed("state mismatch");
 
     let accessToken: string;
     try {
@@ -60,18 +66,14 @@ export function authRoutes(): Hono<AppEnv> {
       // without an access_token: accessToken() then throws, and that is a refusal too.
       accessToken = (await provider.client.validateAuthorizationCode(provider.tokenUrl, parsed.data.code, verifier)).accessToken();
     } catch (err) {
-      if (err instanceof ArcticFetchError || err instanceof UnexpectedResponseError) {
-        console.error("oauth token exchange failed", err);
-        throw fail(502, "sign-in failed: the provider could not be reached");
-      }
-      throw fail(400, "sign-in failed: the provider refused the sign-in");
+      if (err instanceof ArcticFetchError || err instanceof UnexpectedResponseError) return failed("token exchange failed", err);
+      return failed("the provider refused the code");
     }
     let profile;
     try {
       profile = await provider.profile(accessToken, c.var.fetchImpl);
     } catch (err) {
-      console.error("oauth profile request failed", err);
-      throw fail(502, "sign-in failed: could not read your profile");
+      return failed("profile request failed", err);
     }
     const userId = await findOrCreateUser(c.var.db, {
       provider: provider.name,

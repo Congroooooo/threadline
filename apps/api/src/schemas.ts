@@ -129,6 +129,8 @@ export const eventsQuerySchema = z.object({
   after: uuid().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
+export const taskListQuerySchema = z.object({ status: z.enum(TASK_STATUS_VALUES).optional() });
+export const blockerListQuerySchema = z.object({ status: z.enum(["open", "resolved"]).optional() });
 export const searchQuerySchema = z.object({
   q: z.string().trim().min(1).max(1000),
   limit: z.coerce.number().int().min(1).max(25).optional(),

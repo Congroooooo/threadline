@@ -16,6 +16,13 @@ function cookies(res: Response): Record<string, string> {
   return out;
 }
 
+/** Failed sign-ins send the browser back to the app with ?signin=failed and no session. */
+function expectFailedSignIn(res: Response): void {
+  expect(res.status).toBe(302);
+  expect(res.headers.get("location")).toBe(`${ORIGIN}/?signin=failed`);
+  expect(res.headers.getSetCookie().some((c) => c.startsWith("tl_session=") && !c.startsWith("tl_session=;"))).toBe(false);
+}
+
 function cookieHeader(jar: Record<string, string>): string {
   return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
 }
@@ -67,10 +74,19 @@ describe("OAuth sign-in", () => {
     const res = await h.app.request("/auth/github/callback?code=good&state=forged-state-value", {
       headers: { cookie: cookieHeader(jar) },
     });
-    expect(res.status).toBe(400);
-    expect(res.headers.get("set-cookie") ?? "").not.toContain("tl_session=");
+    expectFailedSignIn(res);
     // No cookie at all is refused the same way.
-    expect((await h.app.request("/auth/github/callback?code=good&state=x")).status).toBe(400);
+    expectFailedSignIn(await h.app.request("/auth/github/callback?code=good&state=x"));
+  });
+
+  test("a provider error (the person declined) redirects back without a session", async () => {
+    const h = await harness();
+    const { location, jar } = await start(h);
+    const state = location.searchParams.get("state")!;
+    const res = await h.app.request(`/auth/github/callback?error=access_denied&state=${state}`, {
+      headers: { cookie: cookieHeader(jar) },
+    });
+    expectFailedSignIn(res);
   });
 
   test("a GitHub callback with a valid state signs the person in with the numeric id and stores the login", async () => {
@@ -135,11 +151,10 @@ describe("OAuth sign-in", () => {
     const res = await h.app.request(`/auth/github/callback?code=bad&state=${location.searchParams.get("state")}`, {
       headers: { cookie: cookieHeader(jar) },
     });
-    expect(res.status).toBe(400);
-    expect(res.headers.getSetCookie().some((c) => c.startsWith("tl_session=") && !c.startsWith("tl_session=;"))).toBe(false);
+    expectFailedSignIn(res);
   });
 
-  test("an unreachable provider or unreadable profile is a 502", async () => {
+  test("an unreachable provider or unreadable profile also redirects back", async () => {
     vi.stubGlobal("fetch", fakeFetch(() => Promise.reject(new TypeError("network down"))));
     const h = await harness({}, { fetchImpl: fakeFetch(() => new Response("nope", { status: 500 })) });
     const finish = async () => {
@@ -148,9 +163,9 @@ describe("OAuth sign-in", () => {
         headers: { cookie: cookieHeader(jar) },
       });
     };
-    expect((await finish()).status).toBe(502);
+    expectFailedSignIn(await finish());
     vi.stubGlobal("fetch", provider({ id: 1, login: "x" }));
-    expect((await finish()).status).toBe(502); // the token works, the profile request fails
+    expectFailedSignIn(await finish()); // the token works, the profile request fails
   });
 });
 

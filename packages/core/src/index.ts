@@ -37,6 +37,7 @@ export {
   SESSION_DAYS,
   findOrCreateUser,
   getUser,
+  listAgentTokens,
   createSession,
   endSession,
   resolveSession,
@@ -46,7 +47,7 @@ export {
   resolveAgentToken,
   type Provider,
 } from "./auth.js";
-export { DEFAULT_INVITE_DAYS, MAX_INVITE_DAYS, createInvite, acceptInvite, revokeInvite } from "./invites.js";
+export { DEFAULT_INVITE_DAYS, MAX_INVITE_DAYS, createInvite, acceptInvite, revokeInvite, listInvites } from "./invites.js";
 export {
   PROJECT_KEY,
   MAX_REPO_URLS,
@@ -91,6 +92,8 @@ export {
   myOpenItems,
   getTaskContext,
   getTaskContextById,
+  listBlockers,
+  listTasks,
   getByRef,
   search,
   renderSessionContext,

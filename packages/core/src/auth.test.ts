@@ -6,6 +6,7 @@ import {
   endSession,
   findOrCreateUser,
   getUser,
+  listAgentTokens,
   listMemberships,
   resolveAgentToken,
   resolveSession,
@@ -141,6 +142,32 @@ describe("users and sessions", () => {
 });
 
 describe("agent tokens", () => {
+  test("listAgentTokens: members see their own tokens, admins everyone's, agents none; never a token or hash", async () => {
+    const sam = await teammate("Sam", ["backend"]);
+    const mine = await inWs((tx) => createAgentToken(tx, sam, { name: "sam-laptop", projectIds: [projectId] }));
+    const danas = await inWs((tx) => createAgentToken(tx, member, { name: "dana-ci", projectIds: [projectId, otherProject] }));
+    await inWs((tx) => revokeAgentToken(tx, sam, mine.agentId));
+    const own = await inWs((tx) => listAgentTokens(tx, sam));
+    expect(own).toEqual([{
+      id: mine.agentId,
+      memberId: sam.memberId,
+      ownerName: "Sam",
+      name: "sam-laptop",
+      projectIds: [projectId],
+      createdAt: expect.any(String),
+      lastUsedAt: null,
+      revokedAt: expect.any(String),
+    }]);
+    await resolveAgentToken(db, danas.token);
+    const all = await inWs((tx) => listAgentTokens(tx, member));
+    expect(all.map((t) => [t.id, t.ownerName])).toEqual([[mine.agentId, "Sam"], [danas.agentId, "Dana"]]);
+    expect(all[1]!.lastUsedAt).toEqual(expect.any(String));
+    expect(JSON.stringify(all)).not.toContain(danas.token);
+    expect(JSON.stringify(all)).not.toMatch(/[0-9a-f]{64}/);
+    const agent = await resolveAgentToken(db, danas.token);
+    await expect(inWs((tx) => listAgentTokens(tx, agent!))).rejects.toThrow(ForbiddenError);
+  });
+
   test("tokens are stored only as hashes", async () => {
     const { token } = await inWs((tx) => createAgentToken(tx, member, { name: "laptop", projectIds: [projectId] }));
     expect(token).toMatch(/^tl_[A-Za-z0-9_-]{43}$/);

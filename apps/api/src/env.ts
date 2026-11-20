@@ -31,7 +31,7 @@ export type OAuthCredentials = { clientId: string; clientSecret: string };
 
 export type Config = {
   env: Env;
-  /** PUBLIC_URL without a trailing slash, e.g. https://threadline.example.com */
+  /** PUBLIC_URL without a trailing slash (always just the origin), e.g. https://threadline.example.com */
   publicUrl: string;
   /** The origin browsers send in the Origin header for this deployment. */
   publicOrigin: string;
@@ -62,6 +62,10 @@ export function loadConfig(env: Env): Config {
     throw new Error("PUBLIC_URL must be an absolute URL");
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("PUBLIC_URL must be http(s)");
+  if (url.pathname !== "/" || url.search !== "" || url.hash !== "" || url.username !== "" || url.password !== "") {
+    // Cookies use Path=/ and the API lives at /api and /auth, so Threadline must own the whole origin.
+    throw new Error(`PUBLIC_URL must be an origin without a path, like https://threadline.example.com (got path "${url.pathname}")`);
+  }
   const local = LOCAL_HOSTS.has(url.hostname);
   if (url.protocol === "http:" && !local) throw new Error("PUBLIC_URL must use https unless it is localhost");
   const authMode = env.AUTH_MODE ?? "oauth";
@@ -88,7 +92,7 @@ export function loadConfig(env: Env): Config {
 
   return {
     env,
-    publicUrl: url.origin + url.pathname.replace(/\/+$/, ""),
+    publicUrl: url.origin,
     publicOrigin: url.origin,
     secureCookies: !(url.protocol === "http:" && local),
     authMode,

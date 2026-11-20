@@ -42,7 +42,7 @@ import { parseHttpUrl, quote } from "./safety.js";
 import { membersWithRole, requirePermission } from "./tenancy.js";
 import { UUID } from "./tokens.js";
 import { type Actor, type ExternalRefInput, ForbiddenError, NotFoundError, type Quoted, ValidationError } from "./types.js";
-import { blockedBy, loadTask, MAX_EVIDENCE_URL, memberOf, resolveTaskRef, rowsOf, type TaskStatus } from "./work.js";
+import { blockedBy, loadTask, MAX_EVIDENCE_URL, memberOf, resolveTaskRef, rowsOf, TASK_STATUSES, type TaskStatus } from "./work.js";
 
 // ---------------------------------------------------------------------------------------
 // Views
@@ -384,6 +384,39 @@ export async function getTaskContext(tx: Tx, actor: Actor, input: { projectId: s
     progress: await progressViews(tx, notes),
     evidence: evRows.map(toExternalRef),
   };
+}
+
+/** Every task of the project, by number; only those in `status` when given. */
+export async function listTasks(tx: Tx, actor: Actor, input: { projectId: string; status?: TaskStatus }): Promise<TaskView[]> {
+  const key = await gate(tx, actor, input.projectId);
+  if (input.status !== undefined && !TASK_STATUSES.includes(input.status)) {
+    throw new ValidationError(`status must be one of ${TASK_STATUSES.join(", ")}`);
+  }
+  const rows = await tx
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.projectId, input.projectId), input.status === undefined ? undefined : eq(tasks.status, input.status)))
+    .orderBy(asc(tasks.number));
+  return taskViews(tx, key, rows, await roleKeys(tx));
+}
+
+/** Every blocker of the project, whichever role owns it, oldest first; only `status` when given. */
+export async function listBlockers(
+  tx: Tx,
+  actor: Actor,
+  input: { projectId: string; status?: BlockerStatus },
+): Promise<BlockerView[]> {
+  const key = await gate(tx, actor, input.projectId);
+  if (input.status !== undefined && input.status !== "open" && input.status !== "resolved") {
+    throw new ValidationError("status must be open or resolved");
+  }
+  const rows = await selectBlockers(tx)
+    .where(and(
+      eq(blockersTable.projectId, input.projectId),
+      input.status === undefined ? undefined : eq(blockersTable.status, input.status),
+    ))
+    .orderBy(asc(blockersTable.id));
+  return blockerViews(key, rows, await roleKeys(tx));
 }
 
 /**

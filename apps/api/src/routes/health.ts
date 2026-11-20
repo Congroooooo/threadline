@@ -12,9 +12,12 @@ export function healthRoutes(): Hono<AppEnv> {
       result = await checkDatabaseRole(c.var.db);
     } catch (err) {
       console.error("health check failed", err);
-      result = { ok: false, reason: "database unreachable" };
+      return c.json({ ok: false, reason: "database unreachable" }, 500);
     }
-    return c.json(result, result.ok ? 200 : 500);
+    if (result.ok) return c.json(result);
+    // The detail (role name, what is wrong) is for operators, not for anyone who can reach the URL.
+    console.error("health check failed:", result.reason);
+    return c.json({ ok: false, reason: "database role is not safe" }, 500);
   });
   return app;
 }
