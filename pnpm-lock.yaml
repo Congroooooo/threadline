@@ -113,6 +113,8 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@26.6.6)(jsdom@26.1.0)(tsx@4.23.15)
 
+  integrations/claude-code: {}
+
   packages/core:
     dependencies:
       '@neondatabase/serverless':

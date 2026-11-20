@@ -1,0 +1,9 @@
+{
+  "name": "@threadline/claude-code",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test session-start.test.mjs"
+  }
+}
